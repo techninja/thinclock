@@ -2,6 +2,9 @@
 #include <FastLED_NeoMatrix.h>
 
 static CRGB leds[NUM_LEDS];
+static CRGB render_buf[NUM_LEDS];
+static CRGB prev_frame[NUM_LEDS];
+static CRGB* active_buf = render_buf;
 static FastLED_NeoMatrix* neoMatrix = nullptr;
 
 void Display::begin() {
@@ -9,14 +12,42 @@ void Display::begin() {
     FastLED.setBrightness(40);
 
     neoMatrix = new FastLED_NeoMatrix(
-        leds, MATRIX_WIDTH, MATRIX_HEIGHT,
+        render_buf, MATRIX_WIDTH, MATRIX_HEIGHT,
         NEO_MATRIX_TOP + NEO_MATRIX_LEFT +
         NEO_MATRIX_ROWS + NEO_MATRIX_ZIGZAG
     );
     neoMatrix->begin();
     neoMatrix->setTextWrap(false);
     neoMatrix->clear();
+    memset(leds, 0, sizeof(leds));
+    memset(prev_frame, 0, sizeof(prev_frame));
+    active_buf = render_buf;
     FastLED.show();
+}
+
+void Display::renderToPrev() {
+    active_buf = prev_frame;
+    // Recreate matrix pointing at prev_frame
+    delete neoMatrix;
+    neoMatrix = new FastLED_NeoMatrix(
+        prev_frame, MATRIX_WIDTH, MATRIX_HEIGHT,
+        NEO_MATRIX_TOP + NEO_MATRIX_LEFT +
+        NEO_MATRIX_ROWS + NEO_MATRIX_ZIGZAG
+    );
+    neoMatrix->begin();
+    neoMatrix->setTextWrap(false);
+}
+
+void Display::renderToMain() {
+    active_buf = render_buf;
+    delete neoMatrix;
+    neoMatrix = new FastLED_NeoMatrix(
+        render_buf, MATRIX_WIDTH, MATRIX_HEIGHT,
+        NEO_MATRIX_TOP + NEO_MATRIX_LEFT +
+        NEO_MATRIX_ROWS + NEO_MATRIX_ZIGZAG
+    );
+    neoMatrix->begin();
+    neoMatrix->setTextWrap(false);
 }
 
 void Display::clear() {
@@ -24,6 +55,7 @@ void Display::clear() {
 }
 
 void Display::show() {
+    memcpy(leds, render_buf, sizeof(leds));
     FastLED.show();
 }
 
@@ -59,17 +91,31 @@ int16_t Display::textWidth(const String& text) {
 void Display::applyEdgeFade(uint8_t fadePixels) {
     if (fadePixels == 0) return;
     for (uint8_t f = 0; f < fadePixels; f++) {
-        // Scale: pixel 0 = dimmest, pixel fadePixels-1 = full
         uint8_t scale = (255 * (f + 1)) / (fadePixels + 1);
         for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
-            // Left edge
             uint16_t idxL = neoMatrix->XY(f, y);
-            leds[idxL].nscale8(scale);
-            // Right edge
+            active_buf[idxL].nscale8(scale);
             uint16_t idxR = neoMatrix->XY(MATRIX_WIDTH - 1 - f, y);
-            leds[idxR].nscale8(scale);
+            active_buf[idxR].nscale8(scale);
         }
     }
+}
+
+void Display::fadeAll(uint8_t scale) {
+    for (uint16_t i = 0; i < NUM_LEDS; i++) {
+        active_buf[i].nscale8(scale);
+    }
+}
+
+void Display::snapshot() {
+    memcpy(prev_frame, render_buf, sizeof(prev_frame));
+}
+
+void Display::crossfade(uint8_t progress) {
+    for (uint16_t i = 0; i < NUM_LEDS; i++) {
+        leds[i] = blend(prev_frame[i], render_buf[i], progress);
+    }
+    FastLED.show();
 }
 
 void Display::drawSprite(const uint8_t* data, uint8_t w, uint8_t h, int16_t x, int16_t y) {

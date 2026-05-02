@@ -1,4 +1,7 @@
 #include "config_manager.h"
+#include "sensors.h"
+
+extern Sensors sensors;
 
 bool ConfigManager::fetchConfig(const String& url, Config& cfg) {
     HTTPClient http;
@@ -26,6 +29,10 @@ bool ConfigManager::fetchConfig(const String& url, Config& cfg) {
     cfg.brightness = settings["brightness"] | 40;
     cfg.timezone_offset = settings["timezone"] | 0;
     cfg.scroll_speed = settings["scroll_speed"] | 50;
+    cfg.event_url = settings["event_url"] | "";
+    cfg.time_format = settings["time_format"] | "24h";
+    cfg.temp_unit = settings["temp_unit"] | "C";
+    cfg.transition_ms = settings["transition"] | 8;
 
     // Screens
     for (JsonObject s : doc["screens"].as<JsonArray>()) {
@@ -68,6 +75,19 @@ bool ConfigManager::fetchConfig(const String& url, Config& cfg) {
 bool ConfigManager::fetchData(const String& url, JsonDocument& doc) {
     if (url.isEmpty()) return false;
 
+    // self:// URLs resolve from onboard data, no HTTP needed
+    if (url.startsWith("self://")) {
+        String path = url.substring(7);
+        if (path == "sensors" || path == "/sensors") {
+            doc["temperature"] = round(sensors.data.temperature * 10.0) / 10.0;
+            doc["humidity"] = round(sensors.data.humidity * 10.0) / 10.0;
+            doc["light"] = (int)sensors.data.lightPct;
+            doc["light_raw"] = (int)sensors.data.light;
+            return sensors.data.hasTempHumidity;
+        }
+        return false;
+    }
+
     HTTPClient http;
     http.begin(url);
     http.setTimeout(3000);
@@ -97,6 +117,10 @@ String ConfigManager::resolvePlaceholders(const String& tpl, const JsonDocument&
             value = String(data[key].as<float>(), 1);
         } else if (data[key].is<int>()) {
             value = String(data[key].as<int>());
+        } else if (data[key].is<unsigned int>()) {
+            value = String(data[key].as<unsigned int>());
+        } else if (data[key].is<bool>()) {
+            value = data[key].as<bool>() ? "1" : "0";
         }
         result = result.substring(0, start) + value + result.substring(end + 1);
     }

@@ -1,32 +1,102 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WebServer.h>
+#include <HTTPClient.h>
 #include <time.h>
 #include <Preferences.h>
 #include "thinclock.h"
 #include "display.h"
 #include "config_manager.h"
+#include "sensors.h"
 
 Display display;
 ConfigManager configMgr;
 Config config;
 Preferences prefs;
+Sensors sensors;
+WebServer httpServer(80);
 
-String wifiSSID;
-String wifiPass;
-String configURL;
-
-uint32_t lastConfigFetch = 0;
-uint32_t lastDataFetch = 0;
-uint32_t lastScreenSwitch = 0;
-uint32_t lastScrollStep = 0;
+String wifiSSID, wifiPass, configURL;
+uint32_t lastConfigFetch = 0, lastDataFetch = 0, lastSensorRead = 0;
+uint32_t lastScreenSwitch = 0, lastButtonCheck = 0;
 int currentScreen = 0;
-int16_t scrollOffset = 0;
-int8_t scrollDir = 1;          // 1 = left, -1 = right
-uint32_t scrollPauseUntil = 0; // bounce pause timestamp
-ScrollMode activeScrollMode = SCROLL_NONE;
-int16_t scrollTextW = 0;
-String resolvedText;
 JsonDocument screenData;
+
+// Scroll state (reusable for both outgoing and incoming)
+struct ScrollState {
+    int16_t offset = 0;
+    int8_t dir = 1;
+    uint32_t pauseUntil = 0;
+    uint32_t lastStep = 0;
+    ScrollMode mode = SCROLL_NONE;
+    int16_t textW = 0;
+    bool completedOnce = false;
+    String resolved;
+};
+
+ScrollState scroll;       // current/incoming screen
+ScrollState prevScroll;   // outgoing screen (during transition)
+int prevScreenIdx = -1;
+JsonDocument prevScreenData;
+
+// Transition
+uint16_t transitionProgress = 255;
+bool transitioning = false;
+
+// Buttons
+bool btnLeftLast = HIGH, btnMidLast = HIGH, btnRightLast = HIGH;
+
+#define SENSOR_READ_MS 2000
+#define BUTTON_CHECK_MS 50
+
+// --- Buttons ---
+
+void postEvent(const char* event) {
+    if (config.event_url.isEmpty() || WiFi.status() != WL_CONNECTED) return;
+    HTTPClient http;
+    http.begin(config.event_url);
+    http.setTimeout(2000);
+    http.addHeader("Content-Type", "application/json");
+    String body = "{\"event\":\"" + String(event) + "\",\"screen\":" + currentScreen + "}";
+    http.POST(body);
+    http.end();
+}
+
+void checkButtons() {
+    bool l = digitalRead(BUTTON_LEFT);
+    bool m = digitalRead(BUTTON_MID);
+    bool r = digitalRead(BUTTON_RIGHT);
+    if (l == LOW && btnLeftLast == HIGH)  postEvent("left");
+    if (m == LOW && btnMidLast == HIGH)   postEvent("select");
+    if (r == LOW && btnRightLast == HIGH) postEvent("right");
+    btnLeftLast = l; btnMidLast = m; btnRightLast = r;
+}
+
+// --- HTTP endpoints ---
+
+void handleSensors() {
+    JsonDocument doc;
+    doc["temperature"] = round(sensors.data.temperature * 10.0) / 10.0;
+    doc["humidity"] = round(sensors.data.humidity * 10.0) / 10.0;
+    doc["light"] = (int)sensors.data.lightPct;
+    doc["light_raw"] = (int)sensors.data.light;
+    doc["sensor"] = sensors.type != SENSOR_NONE;
+    String out; serializeJson(doc, out);
+    httpServer.send(200, "application/json", out);
+}
+
+void handleStatus() {
+    JsonDocument doc;
+    doc["uptime"] = millis() / 1000;
+    doc["wifi"] = WiFi.RSSI();
+    doc["ip"] = WiFi.localIP().toString();
+    doc["config_valid"] = config.valid;
+    doc["screen"] = currentScreen;
+    String out; serializeJson(doc, out);
+    httpServer.send(200, "application/json", out);
+}
+
+// --- WiFi & Serial ---
 
 void setupWiFi() {
     prefs.begin("thinclock", true);
@@ -44,13 +114,16 @@ void setupWiFi() {
     Serial.printf("Connecting to %s", wifiSSID.c_str());
     uint32_t start = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
-        delay(250);
-        Serial.print(".");
+        delay(250); Serial.print(".");
     }
     Serial.println(WiFi.status() == WL_CONNECTED ? " OK" : " FAIL");
 
     if (WiFi.status() == WL_CONNECTED) {
+        Serial.printf("IP: %s\n", WiFi.localIP().toString().c_str());
         configTzTime("UTC0", "pool.ntp.org");
+        httpServer.on("/sensors", handleSensors);
+        httpServer.on("/status", handleStatus);
+        httpServer.begin();
     }
 }
 
@@ -59,10 +132,8 @@ void handleSerial() {
     String line = Serial.readStringUntil('\n');
     line.trim();
     if (line.isEmpty()) return;
-
     JsonDocument doc;
     if (deserializeJson(doc, line)) return;
-
     if (doc["ssid"].is<const char*>()) {
         prefs.begin("thinclock", false);
         prefs.putString("ssid", doc["ssid"].as<const char*>());
@@ -76,6 +147,8 @@ void handleSerial() {
     }
 }
 
+// --- Rendering ---
+
 void showClock() {
     struct tm t;
     display.clear();
@@ -86,56 +159,40 @@ void showClock() {
         display.drawText(buf, 2, 0, 0x00AAFF);
     } else {
         char buf[6];
-        snprintf(buf, sizeof(buf), "%02d:%02d", t.tm_hour, t.tm_min);
+        if (config.time_format == "12h") {
+            int h = t.tm_hour % 12; if (h == 0) h = 12;
+            snprintf(buf, sizeof(buf), "%2d:%02d", h, t.tm_min);
+        } else {
+            snprintf(buf, sizeof(buf), "%02d:%02d", t.tm_hour, t.tm_min);
+        }
         display.drawText(buf, 2, 0, 0x00AAFF);
     }
     display.show();
 }
 
-void resetScrollState() {
-    scrollOffset = 0;
-    scrollDir = 1;
-    scrollPauseUntil = 0;
-    activeScrollMode = SCROLL_NONE;
-    scrollTextW = 0;
-    resolvedText = "";
-    lastScrollStep = 0;
-}
-
-void switchScreen() {
-    currentScreen = (currentScreen + 1) % config.screens.size();
-    lastScreenSwitch = millis();
-    screenData.clear();
-    lastDataFetch = 0;
-    resetScrollState();
-}
-
-void showScreen(Screen& scr) {
-    // Resolve text once per data fetch
+// Render a screen with given scroll state (advances scroll each call)
+void renderScreenWithState(Screen& scr, ScrollState& ss, const JsonDocument& data) {
     String text = scr.label;
-    if (!scr.data_url.isEmpty() && !screenData.isNull()) {
-        text = configMgr.resolvePlaceholders(scr.label, screenData);
+    if (!scr.data_url.isEmpty() && !data.isNull()) {
+        text = configMgr.resolvePlaceholders(scr.label, data);
     }
 
-    // Detect if text changed (new data)
-    if (text != resolvedText) {
-        resolvedText = text;
-        scrollTextW = display.textWidth(resolvedText);
-        scrollOffset = 0;
-        scrollDir = 1;
-        scrollPauseUntil = 0;
-        lastScrollStep = millis();
+    // Text changed — reinit scroll
+    if (text != ss.resolved) {
+        ss.resolved = text;
+        ss.textW = display.textWidth(ss.resolved);
+        ss.offset = 0;
+        ss.dir = 1;
+        ss.pauseUntil = 0;
+        ss.completedOnce = false;
+        ss.lastStep = millis();
 
         int16_t startX = scr.text_x >= 0 ? scr.text_x : 0;
-        bool needsScroll = (scrollTextW + startX) > MATRIX_WIDTH;
+        bool needsScroll = (ss.textW + startX) > MATRIX_WIDTH;
 
-        if (scr.scroll == SCROLL_NONE) {
-            activeScrollMode = SCROLL_NONE;
-        } else if (scr.scroll == SCROLL_LEFT || scr.scroll == SCROLL_BOUNCE) {
-            activeScrollMode = scr.scroll;
-        } else { // SCROLL_AUTO
-            activeScrollMode = needsScroll ? SCROLL_BOUNCE : SCROLL_NONE;
-        }
+        if (scr.scroll == SCROLL_NONE) ss.mode = SCROLL_NONE;
+        else if (scr.scroll == SCROLL_LEFT || scr.scroll == SCROLL_BOUNCE) ss.mode = scr.scroll;
+        else ss.mode = needsScroll ? SCROLL_BOUNCE : SCROLL_NONE;
     }
 
     int16_t x = scr.text_x >= 0 ? scr.text_x : 0;
@@ -144,47 +201,67 @@ void showScreen(Screen& scr) {
 
     display.clear();
 
-    if (activeScrollMode == SCROLL_NONE) {
-        display.drawText(resolvedText, x, y, scr.color);
-    } else if (activeScrollMode == SCROLL_BOUNCE) {
-        display.drawText(resolvedText, x - scrollOffset, y, scr.color);
+    if (ss.mode == SCROLL_NONE) {
+        display.drawText(ss.resolved, x, y, scr.color);
+
+    } else if (ss.mode == SCROLL_BOUNCE) {
+        display.drawText(ss.resolved, x - ss.offset, y, scr.color);
         display.applyEdgeFade(scr.fade_edge);
 
-        if (now >= scrollPauseUntil && now - lastScrollStep >= scr.scroll_speed) {
-            scrollOffset += scrollDir;
-            lastScrollStep = now;
-
-            int16_t maxOffset = scrollTextW + x - MATRIX_WIDTH;
-            if (maxOffset < 0) maxOffset = 0;
-
-            if (scrollDir == 1 && scrollOffset >= maxOffset) {
-                scrollOffset = maxOffset;
-                scrollDir = -1;
-                scrollPauseUntil = now + 800; // pause at end
-            } else if (scrollDir == -1 && scrollOffset <= 0) {
-                scrollOffset = 0;
-                scrollDir = 1;
-                scrollPauseUntil = now + 800; // pause at start
+        if (now >= ss.pauseUntil && now - ss.lastStep >= scr.scroll_speed) {
+            ss.offset += ss.dir;
+            ss.lastStep = now;
+            int16_t maxOff = ss.textW + x - MATRIX_WIDTH;
+            if (maxOff < 0) maxOff = 0;
+            if (ss.dir == 1 && ss.offset >= maxOff) {
+                ss.offset = maxOff; ss.dir = -1; ss.pauseUntil = now + 800;
+            } else if (ss.dir == -1 && ss.offset <= 0) {
+                ss.offset = 0; ss.dir = 1; ss.pauseUntil = now + 800;
+                ss.completedOnce = true;
             }
         }
-    } else { // SCROLL_LEFT (banner)
-        int16_t drawX = MATRIX_WIDTH - scrollOffset;
-        display.drawText(resolvedText, drawX, y, scr.color);
+
+    } else { // SCROLL_LEFT
+        int16_t drawX = MATRIX_WIDTH - ss.offset;
+        display.drawText(ss.resolved, drawX, y, scr.color);
         display.applyEdgeFade(scr.fade_edge);
 
-        if (now - lastScrollStep >= scr.scroll_speed) {
-            scrollOffset++;
-            lastScrollStep = now;
-
-            // Text has fully exited left side
-            if (drawX + scrollTextW < 0) {
-                scrollOffset = 0; // re-enter from right
+        if (now - ss.lastStep >= scr.scroll_speed) {
+            ss.offset++;
+            ss.lastStep = now;
+            if (drawX + ss.textW < 0) {
+                ss.offset = 0;
+                ss.completedOnce = true;
             }
         }
     }
-
-    display.show();
 }
+
+void resetScroll(ScrollState& ss) {
+    ss.offset = 0; ss.dir = 1; ss.pauseUntil = 0; ss.lastStep = 0;
+    ss.mode = SCROLL_NONE; ss.textW = 0; ss.completedOnce = false;
+    ss.resolved = "";
+}
+
+void switchScreen() {
+    // Save outgoing state
+    prevScroll = scroll;
+    prevScreenIdx = currentScreen;
+    prevScreenData = screenData;
+
+    // Advance
+    currentScreen = (currentScreen + 1) % config.screens.size();
+    lastScreenSwitch = millis();
+    screenData.clear();
+    lastDataFetch = 0;
+    resetScroll(scroll);
+
+    // Start transition
+    transitioning = true;
+    transitionProgress = 0;
+}
+
+// --- Main ---
 
 void setup() {
     Serial.begin(115200);
@@ -193,34 +270,45 @@ void setup() {
 
     pinMode(BUZZER_PIN, OUTPUT);
     digitalWrite(BUZZER_PIN, LOW);
+    pinMode(BUTTON_LEFT, INPUT_PULLUP);
+    pinMode(BUTTON_MID, INPUT_PULLUP);
+    pinMode(BUTTON_RIGHT, INPUT_PULLUP);
 
     display.begin();
     display.clear();
     display.drawText("BOOT", 1, 0, 0x004400);
     display.show();
 
+    sensors.begin();
     setupWiFi();
     config.valid = false;
+    config.transition_ms = 8;
+    config.time_format = "24h";
+    config.temp_unit = "C";
 }
 
 void loop() {
     handleSerial();
+    httpServer.handleClient();
     uint32_t now = millis();
 
-    // Fetch config periodically
+    if (now - lastButtonCheck > BUTTON_CHECK_MS) { checkButtons(); lastButtonCheck = now; }
+    if (now - lastSensorRead > SENSOR_READ_MS) { sensors.read(); lastSensorRead = now; }
+
+    // Config fetch
     if (!configURL.isEmpty() && WiFi.status() == WL_CONNECTED) {
         if (!config.valid || now - lastConfigFetch > CONFIG_POLL_MS) {
             if (configMgr.fetchConfig(configURL, config)) {
                 display.setBrightness(config.brightness);
                 currentScreen = 0;
                 lastScreenSwitch = now;
-                resetScrollState();
+                resetScroll(scroll);
             }
             lastConfigFetch = now;
         }
     }
 
-    // No valid config — show clock
+    // Fallback clock
     if (!config.valid || config.screens.empty()) {
         showClock();
         delay(500);
@@ -234,21 +322,39 @@ void loop() {
         lastDataFetch = now;
     }
 
-    showScreen(scr);
+    if (transitioning && prevScreenIdx >= 0) {
+        // Render outgoing screen (still animating) into prev_frame
+        display.renderToPrev();
+        Screen& prevScr = config.screens[prevScreenIdx];
+        renderScreenWithState(prevScr, prevScroll, prevScreenData);
 
-    // Cycle screens (but wait for scroll to complete at least once if scrolling)
+        // Render incoming screen into render_buf
+        display.renderToMain();
+        renderScreenWithState(scr, scroll, screenData);
+
+        // Blend and output
+        transitionProgress += config.transition_ms;
+        if (transitionProgress >= 255) {
+            transitioning = false;
+            prevScreenIdx = -1;
+            display.show();
+        } else {
+            display.crossfade((uint8_t)transitionProgress);
+        }
+    } else {
+        // Normal rendering
+        renderScreenWithState(scr, scroll, screenData);
+        display.show();
+    }
+
+    // Screen cycling
     if (now - lastScreenSwitch > scr.duration) {
         bool canSwitch = true;
-        if (activeScrollMode == SCROLL_LEFT) {
-            // Wait for banner to fully exit
-            int16_t drawX = MATRIX_WIDTH - scrollOffset;
-            canSwitch = (drawX + scrollTextW < 0);
-        } else if (activeScrollMode == SCROLL_BOUNCE) {
-            // Switch at home position
-            canSwitch = (scrollOffset == 0 && scrollDir == 1);
+        if (scroll.mode == SCROLL_LEFT || scroll.mode == SCROLL_BOUNCE) {
+            canSwitch = scroll.completedOnce;
         }
         if (canSwitch) switchScreen();
     }
 
-    delay(20); // ~50fps render loop
+    delay(20);
 }
