@@ -19,6 +19,77 @@ function getLocalIP() {
 const LOCAL_IP = getLocalIP();
 const BASE = `http://${LOCAL_IP}:${PORT}`;
 
+// Helper: create 8x8 icon from a simple pixel map
+// Each row is 8 chars, '#' = colored pixel, '.' = black
+function makeIcon(rows, r, g, b) {
+  let hex = '';
+  for (const row of rows) {
+    for (const ch of row.padEnd(8, '.')) {
+      if (ch === '#') {
+        hex += [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+      } else {
+        hex += '000000';
+      }
+    }
+  }
+  return hex;
+}
+
+// Simple 8x8 icons
+const ICONS = {
+  thermo: {
+    width: 8, height: 8, fps: 0,
+    data: [makeIcon([
+      '...##...',
+      '..#..#..',
+      '..#.##..',
+      '..#..#..',
+      '..#.##..',
+      '.#.##.#.',
+      '.#.##.#.',
+      '..####..',
+    ], 0xFF, 0x44, 0x00)],
+  },
+  sun: {
+    width: 8, height: 8, fps: 0,
+    data: [makeIcon([
+      '#..##..#',
+      '.######.',
+      '.######.',
+      '########',
+      '########',
+      '.######.',
+      '.######.',
+      '#..##..#',
+    ], 0xFF, 0xFF, 0x00)],
+  },
+  heart: {
+    width: 8, height: 8, fps: 2,
+    data: [
+      makeIcon([
+        '.##.##..',
+        '########',
+        '########',
+        '.######.',
+        '..####..',
+        '...##...',
+        '........',
+        '........',
+      ], 0xFF, 0x00, 0x44),
+      makeIcon([
+        '........',
+        '..#..#..',
+        '.######.',
+        '.######.',
+        '..####..',
+        '...##...',
+        '........',
+        '........',
+      ], 0xFF, 0x00, 0x44),
+    ],
+  },
+};
+
 // Main config
 app.get('/config', (req, res) => {
   res.json({
@@ -51,32 +122,35 @@ app.get('/config', (req, res) => {
         fade_edge: 2,
       },
       {
+        icon: 'thermo',
         label: '{temperature}F {humidity}%',
         data_url: 'self://sensors',
         duration: 6000,
-        x: 0, y: 0,
+        x: -1, y: 0,
         color: 'FF8800',
         scroll: 'auto',
       },
       {
-        label: 'Lux {light}%',
+        icon: 'sun',
+        label: '{light}%',
         data_url: 'self://sensors',
-        duration: 4000,
-        x: 0, y: 0,
+        duration: 6000,
+        x: -1, y: 0,
         color: 'FFFF00',
-        scroll: 'none',
+        scroll: 'auto',
       },
       {
+        icon: 'heart',
         label: 'Hello from thinclock!',
         duration: 15000,
-        x: 0, y: 0,
+        x: -1, y: 0,
         color: 'FF0088',
         scroll: 'left',
         scroll_speed: 40,
         fade_edge: 3,
       },
     ],
-    sprites: [],
+    icons: ICONS,
   });
 });
 

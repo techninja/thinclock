@@ -107,6 +107,17 @@ void Display::fadeAll(uint8_t scale) {
     }
 }
 
+void Display::clearRect(int16_t x, int16_t y, int16_t w, int16_t h) {
+    for (int16_t row = y; row < y + h && row < MATRIX_HEIGHT; row++) {
+        for (int16_t col = x; col < x + w && col < MATRIX_WIDTH; col++) {
+            if (col >= 0 && row >= 0) {
+                uint16_t idx = neoMatrix->XY(col, row);
+                active_buf[idx] = CRGB::Black;
+            }
+        }
+    }
+}
+
 void Display::snapshot() {
     memcpy(prev_frame, render_buf, sizeof(prev_frame));
 }

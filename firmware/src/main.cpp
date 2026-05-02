@@ -32,6 +32,9 @@ struct ScrollState {
     int16_t textW = 0;
     bool completedOnce = false;
     String resolved;
+    // Icon animation
+    uint8_t iconFrame = 0;
+    uint32_t lastIconStep = 0;
 };
 
 ScrollState scroll;       // current/incoming screen
@@ -177,6 +180,14 @@ void renderScreenWithState(Screen& scr, ScrollState& ss, const JsonDocument& dat
         text = configMgr.resolvePlaceholders(scr.label, data);
     }
 
+    // Icon lookup
+    Icon* icon = nullptr;
+    int16_t iconW = 0;
+    if (!scr.icon.isEmpty() && config.icons.count(scr.icon)) {
+        icon = &config.icons[scr.icon];
+        iconW = icon->width + 1; // +1 pixel gap
+    }
+
     // Text changed — reinit scroll
     if (text != ss.resolved) {
         ss.resolved = text;
@@ -187,7 +198,7 @@ void renderScreenWithState(Screen& scr, ScrollState& ss, const JsonDocument& dat
         ss.completedOnce = false;
         ss.lastStep = millis();
 
-        int16_t startX = scr.text_x >= 0 ? scr.text_x : 0;
+        int16_t startX = scr.text_x >= 0 ? scr.text_x : iconW;
         bool needsScroll = (ss.textW + startX) > MATRIX_WIDTH;
 
         if (scr.scroll == SCROLL_NONE) ss.mode = SCROLL_NONE;
@@ -195,23 +206,24 @@ void renderScreenWithState(Screen& scr, ScrollState& ss, const JsonDocument& dat
         else ss.mode = needsScroll ? SCROLL_BOUNCE : SCROLL_NONE;
     }
 
-    int16_t x = scr.text_x >= 0 ? scr.text_x : 0;
+    int16_t textX = scr.text_x >= 0 ? scr.text_x : iconW;
     int16_t y = scr.text_y >= 0 ? scr.text_y : 0;
     uint32_t now = millis();
 
     display.clear();
 
+    // 1) Draw text first
     if (ss.mode == SCROLL_NONE) {
-        display.drawText(ss.resolved, x, y, scr.color);
+        display.drawText(ss.resolved, textX, y, scr.color);
 
     } else if (ss.mode == SCROLL_BOUNCE) {
-        display.drawText(ss.resolved, x - ss.offset, y, scr.color);
+        display.drawText(ss.resolved, textX - ss.offset, y, scr.color);
         display.applyEdgeFade(scr.fade_edge);
 
         if (now >= ss.pauseUntil && now - ss.lastStep >= scr.scroll_speed) {
             ss.offset += ss.dir;
             ss.lastStep = now;
-            int16_t maxOff = ss.textW + x - MATRIX_WIDTH;
+            int16_t maxOff = ss.textW + textX - MATRIX_WIDTH;
             if (maxOff < 0) maxOff = 0;
             if (ss.dir == 1 && ss.offset >= maxOff) {
                 ss.offset = maxOff; ss.dir = -1; ss.pauseUntil = now + 800;
@@ -222,25 +234,44 @@ void renderScreenWithState(Screen& scr, ScrollState& ss, const JsonDocument& dat
         }
 
     } else { // SCROLL_LEFT
-        int16_t drawX = MATRIX_WIDTH - ss.offset;
+        // Start text just off the right edge of the visible area
+        int16_t entryX = MATRIX_WIDTH;
+        int16_t drawX = entryX - ss.offset;
         display.drawText(ss.resolved, drawX, y, scr.color);
         display.applyEdgeFade(scr.fade_edge);
 
         if (now - ss.lastStep >= scr.scroll_speed) {
             ss.offset++;
             ss.lastStep = now;
-            if (drawX + ss.textW < 0) {
+            // Fully exited left (past icon zone)
+            int16_t exitX = icon ? -(int16_t)icon->width : 0;
+            if (drawX + ss.textW < exitX) {
                 ss.offset = 0;
                 ss.completedOnce = true;
             }
         }
+    }
+
+    // 2) Clear icon zone and draw icon on top of text
+    if (icon && !icon->frames.empty()) {
+        display.clearRect(0, 0, icon->width, icon->height);
+
+        if (icon->fps > 0 && icon->frames.size() > 1) {
+            uint32_t frameMs = 1000 / icon->fps;
+            if (now - ss.lastIconStep >= frameMs) {
+                ss.iconFrame = (ss.iconFrame + 1) % icon->frames.size();
+                ss.lastIconStep = now;
+            }
+        }
+        uint8_t fi = ss.iconFrame % icon->frames.size();
+        display.drawSprite(icon->frames[fi].data(), icon->width, icon->height, 0, 0);
     }
 }
 
 void resetScroll(ScrollState& ss) {
     ss.offset = 0; ss.dir = 1; ss.pauseUntil = 0; ss.lastStep = 0;
     ss.mode = SCROLL_NONE; ss.textW = 0; ss.completedOnce = false;
-    ss.resolved = "";
+    ss.resolved = ""; ss.iconFrame = 0; ss.lastIconStep = 0;
 }
 
 void switchScreen() {
@@ -256,9 +287,15 @@ void switchScreen() {
     lastDataFetch = 0;
     resetScroll(scroll);
 
-    // Start transition
-    transitioning = true;
-    transitionProgress = 0;
+    // Start transition (skip crossfade for banner screens - they start empty)
+    Screen& nextScr = config.screens[currentScreen];
+    if (nextScr.scroll == SCROLL_LEFT) {
+        transitioning = false;
+        transitionProgress = 255;
+    } else {
+        transitioning = true;
+        transitionProgress = 0;
+    }
 }
 
 // --- Main ---

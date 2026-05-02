@@ -3,6 +3,17 @@
 
 extern Sensors sensors;
 
+// Decode hex string to byte array: "FF00AA" → [0xFF, 0x00, 0xAA]
+static std::vector<uint8_t> hexToBytes(const char* hex) {
+    std::vector<uint8_t> bytes;
+    size_t len = strlen(hex);
+    for (size_t i = 0; i + 1 < len; i += 2) {
+        char pair[3] = { hex[i], hex[i+1], 0 };
+        bytes.push_back((uint8_t)strtoul(pair, NULL, 16));
+    }
+    return bytes;
+}
+
 bool ConfigManager::fetchConfig(const String& url, Config& cfg) {
     HTTPClient http;
     http.begin(url);
@@ -21,7 +32,7 @@ bool ConfigManager::fetchConfig(const String& url, Config& cfg) {
     if (err) return false;
 
     cfg.screens.clear();
-    cfg.sprites.clear();
+    cfg.icons.clear();
     cfg.valid = true;
 
     // Settings
@@ -57,16 +68,22 @@ bool ConfigManager::fetchConfig(const String& url, Config& cfg) {
         cfg.screens.push_back(scr);
     }
 
-    // Sprites
-    for (JsonObject sp : doc["sprites"].as<JsonArray>()) {
-        Sprite spr;
-        spr.name = sp["name"] | "";
-        spr.url = sp["url"] | "";
-        spr.width = sp["width"] | 8;
-        spr.height = sp["height"] | 8;
-        spr.frames = sp["frames"] | 1;
-        spr.cached = false;
-        cfg.sprites.push_back(spr);
+    // Icons
+    JsonObject icons = doc["icons"];
+    for (JsonPair kv : icons) {
+        Icon icon;
+        JsonObject obj = kv.value();
+        icon.width = obj["width"] | 8;
+        icon.height = obj["height"] | 8;
+        icon.fps = obj["fps"] | 0;
+
+        JsonArray dataArr = obj["data"];
+        if (dataArr) {
+            for (JsonVariant frame : dataArr) {
+                icon.frames.push_back(hexToBytes(frame.as<const char*>()));
+            }
+        }
+        cfg.icons[String(kv.key().c_str())] = icon;
     }
 
     return true;
@@ -83,7 +100,7 @@ bool ConfigManager::fetchData(const String& url, JsonDocument& doc) {
             doc["humidity"] = round(sensors.data.humidity * 10.0) / 10.0;
             doc["light"] = (int)sensors.data.lightPct;
             doc["light_raw"] = (int)sensors.data.light;
-            return sensors.data.hasTempHumidity;
+            return true;  // LDR always available
         }
         return false;
     }
@@ -111,16 +128,22 @@ String ConfigManager::resolvePlaceholders(const String& tpl, const JsonDocument&
         if (end < 0) break;
         String key = result.substring(start + 1, end);
         String value = "";
-        if (data[key].is<const char*>()) {
-            value = data[key].as<const char*>();
-        } else if (data[key].is<float>()) {
-            value = String(data[key].as<float>(), 1);
-        } else if (data[key].is<int>()) {
-            value = String(data[key].as<int>());
-        } else if (data[key].is<unsigned int>()) {
-            value = String(data[key].as<unsigned int>());
-        } else if (data[key].is<bool>()) {
-            value = data[key].as<bool>() ? "1" : "0";
+        JsonVariantConst v = data[key.c_str()];
+        if (!v.isNull()) {
+            if (v.is<const char*>()) {
+                value = v.as<const char*>();
+            } else if (v.is<long>()) {
+                value = String(v.as<long>());
+            } else if (v.is<double>()) {
+                // Show 1 decimal, but trim .0 for whole numbers
+                double d = v.as<double>();
+                if (d == (long)d) value = String((long)d);
+                else value = String(d, 1);
+            } else if (v.is<bool>()) {
+                value = v.as<bool>() ? "1" : "0";
+            } else {
+                value = v.as<String>();
+            }
         }
         result = result.substring(0, start) + value + result.substring(end + 1);
     }
