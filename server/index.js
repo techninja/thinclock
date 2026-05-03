@@ -39,6 +39,12 @@ function makeIcon(rows, r, g, b) {
 const ICONS = {
   thermo: {
     width: 8, height: 8, fps: 0,
+    remap_key: 'FF4400',
+    value_key: 'temperature',
+    range: {
+      min: 0, max: 50,
+      stops: [[0, '0044FF'], [0.4, '00FF44'], [0.7, 'FFAA00'], [1, 'FF0000']],
+    },
     data: [makeIcon([
       '...##...',
       '..#..#..',
@@ -51,17 +57,13 @@ const ICONS = {
     ], 0xFF, 0x44, 0x00)],
   },
   sun: {
-    width: 8, height: 8, fps: 0,
-    data: [makeIcon([
-      '#..##..#',
-      '.######.',
-      '.######.',
-      '########',
-      '########',
-      '.######.',
-      '.######.',
-      '#..##..#',
-    ], 0xFF, 0xFF, 0x00)],
+    width: 8, height: 8,
+    gauge: 'vbar',
+    value_key: 'light',
+    range: {
+      min: 0, max: 100,
+      stops: [[0, '222244'], [0.3, 'FFAA00'], [1, 'FFFF88']],
+    },
   },
   heart: {
     width: 8, height: 8, fps: 2,

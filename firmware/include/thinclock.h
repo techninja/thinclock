@@ -26,20 +26,40 @@
 #define DATA_POLL_MS 5000
 
 enum ScrollMode { SCROLL_NONE, SCROLL_AUTO, SCROLL_LEFT, SCROLL_BOUNCE };
+enum GaugeStyle { GAUGE_NONE, GAUGE_VBAR, GAUGE_HBAR, GAUGE_DOT };
+
+struct ColorStop {
+    float pos;       // 0.0 - 1.0
+    uint8_t r, g, b;
+};
+
+struct ColorRange {
+    float min_val;
+    float max_val;
+    std::vector<ColorStop> stops;
+};
 
 struct Icon {
     uint8_t width;
     uint8_t height;
-    uint8_t fps;                          // 0 = static
-    std::vector<std::vector<uint8_t>> frames;  // RGB888 bytes per frame
+    uint8_t fps;
+    std::vector<std::vector<uint8_t>> frames;
+
+    // Gauge mode (procedurally drawn, no pixel data needed)
+    GaugeStyle gauge;
+    String value_key;     // data key to read value from, e.g. "temperature"
+    ColorRange range;
+
+    // Color remap: replace key_color pixels with range-derived color
+    uint32_t remap_key;   // RGB color to replace (0 = disabled)
 };
 
 struct Screen {
-    String icon;        // icon name reference into Config::icons
+    String icon;
     String label;
     String data_url;
     uint32_t duration;
-    int16_t text_x;     // -1 = auto (after icon)
+    int16_t text_x;
     int16_t text_y;
     uint32_t color;
     ScrollMode scroll;

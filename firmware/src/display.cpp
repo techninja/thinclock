@@ -5,49 +5,44 @@ static CRGB leds[NUM_LEDS];
 static CRGB render_buf[NUM_LEDS];
 static CRGB prev_frame[NUM_LEDS];
 static CRGB* active_buf = render_buf;
-static FastLED_NeoMatrix* neoMatrix = nullptr;
+
+static FastLED_NeoMatrix* mainMatrix = nullptr;
+static FastLED_NeoMatrix* prevMatrix = nullptr;
+static FastLED_NeoMatrix* neoMatrix = nullptr; // current active
+
+static const uint16_t matrixFlags =
+    NEO_MATRIX_TOP + NEO_MATRIX_LEFT +
+    NEO_MATRIX_ROWS + NEO_MATRIX_ZIGZAG;
 
 void Display::begin() {
     FastLED.addLeds<NEOPIXEL, LED_PIN>(leds, NUM_LEDS);
     FastLED.setBrightness(40);
 
-    neoMatrix = new FastLED_NeoMatrix(
-        render_buf, MATRIX_WIDTH, MATRIX_HEIGHT,
-        NEO_MATRIX_TOP + NEO_MATRIX_LEFT +
-        NEO_MATRIX_ROWS + NEO_MATRIX_ZIGZAG
-    );
-    neoMatrix->begin();
-    neoMatrix->setTextWrap(false);
+    mainMatrix = new FastLED_NeoMatrix(render_buf, MATRIX_WIDTH, MATRIX_HEIGHT, matrixFlags);
+    mainMatrix->begin();
+    mainMatrix->setTextWrap(false);
+
+    prevMatrix = new FastLED_NeoMatrix(prev_frame, MATRIX_WIDTH, MATRIX_HEIGHT, matrixFlags);
+    prevMatrix->begin();
+    prevMatrix->setTextWrap(false);
+
+    neoMatrix = mainMatrix;
+    active_buf = render_buf;
+
     neoMatrix->clear();
     memset(leds, 0, sizeof(leds));
     memset(prev_frame, 0, sizeof(prev_frame));
-    active_buf = render_buf;
     FastLED.show();
 }
 
 void Display::renderToPrev() {
+    neoMatrix = prevMatrix;
     active_buf = prev_frame;
-    // Recreate matrix pointing at prev_frame
-    delete neoMatrix;
-    neoMatrix = new FastLED_NeoMatrix(
-        prev_frame, MATRIX_WIDTH, MATRIX_HEIGHT,
-        NEO_MATRIX_TOP + NEO_MATRIX_LEFT +
-        NEO_MATRIX_ROWS + NEO_MATRIX_ZIGZAG
-    );
-    neoMatrix->begin();
-    neoMatrix->setTextWrap(false);
 }
 
 void Display::renderToMain() {
+    neoMatrix = mainMatrix;
     active_buf = render_buf;
-    delete neoMatrix;
-    neoMatrix = new FastLED_NeoMatrix(
-        render_buf, MATRIX_WIDTH, MATRIX_HEIGHT,
-        NEO_MATRIX_TOP + NEO_MATRIX_LEFT +
-        NEO_MATRIX_ROWS + NEO_MATRIX_ZIGZAG
-    );
-    neoMatrix->begin();
-    neoMatrix->setTextWrap(false);
 }
 
 void Display::clear() {
@@ -101,12 +96,6 @@ void Display::applyEdgeFade(uint8_t fadePixels) {
     }
 }
 
-void Display::fadeAll(uint8_t scale) {
-    for (uint16_t i = 0; i < NUM_LEDS; i++) {
-        active_buf[i].nscale8(scale);
-    }
-}
-
 void Display::clearRect(int16_t x, int16_t y, int16_t w, int16_t h) {
     for (int16_t row = y; row < y + h && row < MATRIX_HEIGHT; row++) {
         for (int16_t col = x; col < x + w && col < MATRIX_WIDTH; col++) {
@@ -115,6 +104,12 @@ void Display::clearRect(int16_t x, int16_t y, int16_t w, int16_t h) {
                 active_buf[idx] = CRGB::Black;
             }
         }
+    }
+}
+
+void Display::fadeAll(uint8_t scale) {
+    for (uint16_t i = 0; i < NUM_LEDS; i++) {
+        active_buf[i].nscale8(scale);
     }
 }
 

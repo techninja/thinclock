@@ -8,6 +8,7 @@
 #include "display.h"
 #include "config_manager.h"
 #include "sensors.h"
+#include "gauge.h"
 
 Display display;
 ConfigManager configMgr;
@@ -185,7 +186,9 @@ void renderScreenWithState(Screen& scr, ScrollState& ss, const JsonDocument& dat
     int16_t iconW = 0;
     if (!scr.icon.isEmpty() && config.icons.count(scr.icon)) {
         icon = &config.icons[scr.icon];
-        iconW = icon->width + 1; // +1 pixel gap
+        if (!icon->frames.empty() || icon->gauge != GAUGE_NONE) {
+            iconW = icon->width + 1;
+        }
     }
 
     // Text changed — reinit scroll
@@ -264,7 +267,25 @@ void renderScreenWithState(Screen& scr, ScrollState& ss, const JsonDocument& dat
             }
         }
         uint8_t fi = ss.iconFrame % icon->frames.size();
-        display.drawSprite(icon->frames[fi].data(), icon->width, icon->height, 0, 0);
+
+        // Color remap: replace key color with range-derived color
+        if (icon->remap_key != 0 && !icon->range.stops.empty() && !icon->value_key.isEmpty()) {
+            float val = data[icon->value_key.c_str()].as<float>();
+            uint32_t newColor = colorFromRange(icon->range, val);
+            std::vector<uint8_t> remapped = icon->frames[fi];
+            remapIconColor(remapped, icon->remap_key, newColor);
+            display.drawSprite(remapped.data(), icon->width, icon->height, 0, 0);
+        } else {
+            display.drawSprite(icon->frames[fi].data(), icon->width, icon->height, 0, 0);
+        }
+    } else if (icon && icon->gauge != GAUGE_NONE) {
+        // Procedural gauge
+        display.clearRect(0, 0, icon->width, icon->height);
+        float val = 0;
+        if (!icon->value_key.isEmpty()) {
+            val = data[icon->value_key.c_str()].as<float>();
+        }
+        drawGauge(display, *icon, val, 0, 0);
     }
 }
 
@@ -292,6 +313,7 @@ void switchScreen() {
     if (nextScr.scroll == SCROLL_LEFT) {
         transitioning = false;
         transitionProgress = 255;
+        prevScreenIdx = -1;
     } else {
         transitioning = true;
         transitionProgress = 0;
@@ -317,6 +339,7 @@ void setup() {
     display.show();
 
     sensors.begin();
+    sensors.read();
     setupWiFi();
     config.valid = false;
     config.transition_ms = 8;
@@ -360,23 +383,32 @@ void loop() {
     }
 
     if (transitioning && prevScreenIdx >= 0) {
-        // Render outgoing screen (still animating) into prev_frame
-        display.renderToPrev();
-        Screen& prevScr = config.screens[prevScreenIdx];
-        renderScreenWithState(prevScr, prevScroll, prevScreenData);
-
-        // Render incoming screen into render_buf
-        display.renderToMain();
-        renderScreenWithState(scr, scroll, screenData);
-
-        // Blend and output
-        transitionProgress += config.transition_ms;
-        if (transitionProgress >= 255) {
-            transitioning = false;
-            prevScreenIdx = -1;
+        // Wait for incoming screen to have data before starting crossfade
+        if (!scr.data_url.isEmpty() && screenData.isNull()) {
+            // Still waiting for first fetch — just show outgoing screen
+            display.renderToMain();
+            Screen& prevScr = config.screens[prevScreenIdx];
+            renderScreenWithState(prevScr, prevScroll, prevScreenData);
             display.show();
         } else {
-            display.crossfade((uint8_t)transitionProgress);
+            // Render outgoing screen into prev_frame
+            display.renderToPrev();
+            Screen& prevScr = config.screens[prevScreenIdx];
+            renderScreenWithState(prevScr, prevScroll, prevScreenData);
+
+            // Render incoming screen into render_buf
+            display.renderToMain();
+            renderScreenWithState(scr, scroll, screenData);
+
+            // Blend and output
+            transitionProgress += config.transition_ms;
+            if (transitionProgress >= 255) {
+                transitioning = false;
+                prevScreenIdx = -1;
+                display.show();
+            } else {
+                display.crossfade((uint8_t)transitionProgress);
+            }
         }
     } else {
         // Normal rendering

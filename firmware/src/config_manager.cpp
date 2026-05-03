@@ -14,6 +14,25 @@ static std::vector<uint8_t> hexToBytes(const char* hex) {
     return bytes;
 }
 
+static ColorRange parseColorRange(JsonObject obj) {
+    ColorRange cr;
+    cr.min_val = obj["min"] | 0.0f;
+    cr.max_val = obj["max"] | 100.0f;
+    JsonArray stops = obj["stops"];
+    if (stops) {
+        for (JsonArray stop : stops) {
+            ColorStop cs;
+            cs.pos = stop[0].as<float>();
+            uint32_t c = strtoul(stop[1].as<const char*>(), NULL, 16);
+            cs.r = (c >> 16) & 0xFF;
+            cs.g = (c >> 8) & 0xFF;
+            cs.b = c & 0xFF;
+            cr.stops.push_back(cs);
+        }
+    }
+    return cr;
+}
+
 bool ConfigManager::fetchConfig(const String& url, Config& cfg) {
     HTTPClient http;
     http.begin(url);
@@ -83,6 +102,24 @@ bool ConfigManager::fetchConfig(const String& url, Config& cfg) {
                 icon.frames.push_back(hexToBytes(frame.as<const char*>()));
             }
         }
+
+        // Gauge
+        const char* gaugeStr = obj["gauge"] | "";
+        if (strcmp(gaugeStr, "vbar") == 0) icon.gauge = GAUGE_VBAR;
+        else if (strcmp(gaugeStr, "hbar") == 0) icon.gauge = GAUGE_HBAR;
+        else if (strcmp(gaugeStr, "dot") == 0) icon.gauge = GAUGE_DOT;
+        else icon.gauge = GAUGE_NONE;
+
+        icon.value_key = obj["value_key"] | "";
+
+        if (obj["range"].is<JsonObject>()) {
+            icon.range = parseColorRange(obj["range"]);
+        }
+
+        // Color remap
+        icon.remap_key = obj["remap_key"].is<const char*>()
+            ? strtoul(obj["remap_key"].as<const char*>(), NULL, 16) : 0;
+
         cfg.icons[String(kv.key().c_str())] = icon;
     }
 
