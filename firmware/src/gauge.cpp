@@ -28,19 +28,16 @@ uint32_t colorFromRange(const ColorRange& range, float value) {
     return 0xFFFFFF;
 }
 
-void drawGauge(Display& display, const Icon& icon, float value, int16_t x, int16_t y) {
-    float norm = (value - icon.range.min_val) / (icon.range.max_val - icon.range.min_val);
+void drawGauge(Display& display, GaugeStyle style, uint8_t w, uint8_t h, const ColorRange& range, float value, int16_t x, int16_t y) {
+    float norm = (value - range.min_val) / (range.max_val - range.min_val);
     if (norm < 0.0f) norm = 0.0f;
     if (norm > 1.0f) norm = 1.0f;
 
-    uint32_t color = colorFromRange(icon.range, value);
-    uint8_t w = icon.width;
-    uint8_t h = icon.height;
+    uint32_t color = colorFromRange(range, value);
 
-    // Draw border (brighter so it's visible)
     uint32_t border = 0x666666;
 
-    switch (icon.gauge) {
+    switch (style) {
         case GAUGE_VBAR: {
             // Border
             for (uint8_t col = 0; col < w; col++) {

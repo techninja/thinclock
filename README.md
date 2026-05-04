@@ -1,73 +1,76 @@
 # thinclock
 
-Thin, config-driven ESP32 firmware for the Ulanzi TC001 (32×8 LED matrix).
-JSON in, pixels out.
+Thin, config-driven ESP32 firmware for LED matrix displays. JSON in, pixels out.
 
 The firmware is intentionally dumb — it fetches JSON from a URL and renders
-what it's told. Any system that can serve JSON can drive the display.
+what it's told. The server is smart — screen definitions are composable JS
+modules that can pull data from any source.
 
 ## Quick Start
 
 ```bash
 npm install
-cp .env.example .env   # edit with your WiFi credentials
-npm run dev             # start config server
+cp .env.example .env   # edit with your WiFi + settings
+npm run dev            # start config server
+npm run flash          # build & upload firmware
 ```
 
-In another terminal:
-```bash
-npm run flash           # build & upload firmware
-npm run monitor         # open serial monitor
-```
-
-Paste the JSON line the server printed into the serial monitor. Device reboots
-and starts rendering.
-
-## Scripts
-
-| Command            | Description                              |
-|--------------------|------------------------------------------|
-| `npm run dev`      | Start the config/data server             |
-| `npm run build`    | Compile firmware only                    |
-| `npm run flash`    | Compile and upload firmware              |
-| `npm run flash:force` | Erase flash, then compile and upload  |
-| `npm run erase`    | Erase ESP32 flash completely             |
-| `npm run monitor`  | Open serial monitor (115200 baud)        |
-
-## How It Works
-
-```
-Config URL → screens[] → for each screen:
-  label: "It is {temp}F"      ← text with placeholders
-  data_url: "http://.../temp"  ← returns {"temp": 72}
-  → renders: "It is 72F"
-  → scrolls if text overflows
-  → next screen after duration
-```
-
-Falls back to a basic clock when unconfigured.
-
-## Project Structure
+## Architecture
 
 ```
 thinclock/
-├── firmware/          # ESP32 PlatformIO project
-│   ├── src/           # Firmware source
-│   ├── include/       # Headers
-│   └── platformio.ini
-├── server/            # Node.js config & data server
-│   └── index.js
-├── docs/              # Format spec & examples
-│   ├── FORMAT.md
-│   └── example_config.json
-├── .env.example       # Environment template
-└── package.json       # Project orchestrator
+├── firmware/          # ESP32 PlatformIO project (thin renderer)
+├── server/            # Node.js config server (smart brain)
+│   ├── screens/       # Screen modules (JS) — add your own!
+│   ├── adapters/      # Data adapters (HA, MQTT, etc.)
+│   └── lib/           # Shared utilities
+├── homeassistant/     # HA custom component
+│   └── custom_components/thinclock/
+└── docs/              # Format spec & examples
 ```
 
-## JSON Format
+## Screen Modules
 
-See [docs/FORMAT.md](docs/FORMAT.md) for the complete specification, scroll
-modes, data endpoint format, and integration examples.
+Each screen is a JS file in `server/screens/` that exports:
+
+```js
+exports.name = 'My Screen';
+exports.enabled = true;
+
+exports.icons = { /* optional icon definitions */ };
+
+exports.screen = (config) => ({
+  duration: 10000,
+  layers: [
+    { type: 'clock', x: 0, y: 0, color: 'FFFFFF' },
+    { type: 'particles', gravity: 5, edge: 'die', ... },
+  ],
+});
+
+exports.routes = (app, config) => { /* optional data endpoints */ };
+```
+
+## Layer Types
+
+| Type | Description |
+|------|-------------|
+| `icon` | Static/animated sprite |
+| `text` | Scrollable text with data placeholders |
+| `native` | Pixel-perfect digits (3×5 or 5×7) |
+| `clock` | Native time display |
+| `gauge` | Procedural value indicator (vbar/hbar/dot) |
+| `particles` | Particle system (bouncing, rain, fireworks, etc.) |
+| `pixels` | Pattern-based pixel draws (week_dots, etc.) |
+
+## Scripts
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start config server |
+| `npm run build` | Compile firmware |
+| `npm run flash` | Compile and upload |
+| `npm run flash:force` | Erase + upload |
+| `npm run monitor` | Serial monitor |
 
 ## Hardware
 

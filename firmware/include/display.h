@@ -17,6 +17,15 @@ public:
     void fadeAll(uint8_t scale);
     void snapshot();
     void crossfade(uint8_t progress);
-    void renderToPrev();   // redirect drawing to prev_frame buffer
-    void renderToMain();   // redirect drawing back to render_buf
+    void renderToPrev();
+    void renderToMain();
+
+    // Opacity support: snapshot before layer, blend after
+    void snapshotLayer();  // save current buffer state
+    void applyLayerOpacity(uint8_t opacity);  // blend new pixels with saved state
+
+    // Native pixel-perfect renderers (no font library)
+    void drawDigit(int16_t x, int16_t y, uint8_t digit, uint32_t color, bool large = false);
+    void drawColon(int16_t x, int16_t y, uint32_t color, bool large = false);
+    int16_t drawNativeText(const String& text, int16_t x, int16_t y, uint32_t color, uint8_t spacing = 1, bool large = false);
 };

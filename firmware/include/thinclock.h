@@ -7,9 +7,6 @@
 // Ulanzi TC001: 32x8 pixel matrix
 #define MATRIX_WIDTH 32
 #define MATRIX_HEIGHT 8
-#define PANEL_CHAIN 1
-
-// Ulanzi TC001 pin mapping
 #define LED_PIN 32
 #define BUZZER_PIN 15
 #define LDR_PIN 35
@@ -21,15 +18,29 @@
 #define I2C_SCL 22
 #define NUM_LEDS (MATRIX_WIDTH * MATRIX_HEIGHT)
 
-// Config fetch interval
 #define CONFIG_POLL_MS 30000
 #define DATA_POLL_MS 5000
 
+// --- Enums ---
+
 enum ScrollMode { SCROLL_NONE, SCROLL_AUTO, SCROLL_LEFT, SCROLL_BOUNCE };
 enum GaugeStyle { GAUGE_NONE, GAUGE_VBAR, GAUGE_HBAR, GAUGE_DOT };
+enum ParticleBehavior { PB_DIE, PB_BOUNCE, PB_WRAP };
+enum LayerType {
+    LAYER_ICON,
+    LAYER_TEXT,
+    LAYER_NATIVE,     // pixel-perfect text (digits, colon, %, F/C)
+    LAYER_PARTICLES,
+    LAYER_GAUGE,
+    LAYER_CLOCK,
+    LAYER_PIXELS,
+    LAYER_GRADIENT,
+};
+
+// --- Color ---
 
 struct ColorStop {
-    float pos;       // 0.0 - 1.0
+    float pos;
     uint8_t r, g, b;
 };
 
@@ -39,33 +50,113 @@ struct ColorRange {
     std::vector<ColorStop> stops;
 };
 
+// --- Icon ---
+
 struct Icon {
     uint8_t width;
     uint8_t height;
     uint8_t fps;
     std::vector<std::vector<uint8_t>> frames;
-
-    // Gauge mode (procedurally drawn, no pixel data needed)
-    GaugeStyle gauge;
-    String value_key;     // data key to read value from, e.g. "temperature"
-    ColorRange range;
-
-    // Color remap: replace key_color pixels with range-derived color
-    uint32_t remap_key;   // RGB color to replace (0 = disabled)
+    uint32_t remap_key;
+    String remap_value_key;
+    ColorRange remap_range;
 };
 
-struct Screen {
-    String icon;
+// --- Particles ---
+
+struct ParticleEmitter {
+    float x, y;
+    float vx_min, vx_max;
+    float vy_min, vy_max;
+    float rate;
+    uint16_t lifetime_min, lifetime_max;
+    uint8_t size;
+    bool is_rocket;
+    float accumulator;
+};
+
+struct ParticleConfig {
+    std::vector<ParticleEmitter> emitters;
+    float gravity;
+    ParticleBehavior edge;
+    ColorRange colors;
+    String mask;
+    bool active;
+};
+
+// --- Pixel pattern ---
+
+struct PixelDot {
+    int16_t x, y;
+    uint32_t color;
+};
+
+// --- Layer ---
+
+struct Layer {
+    LayerType type;
+    int16_t x, y;
+    uint8_t opacity;  // 0-255, applied to all pixels this layer draws
+
+    // LAYER_ICON
+    String icon_name;
+
+    // LAYER_TEXT
     String label;
     String data_url;
-    uint32_t duration;
-    int16_t text_x;
-    int16_t text_y;
     uint32_t color;
     ScrollMode scroll;
     uint16_t scroll_speed;
     uint8_t fade_edge;
+
+    // LAYER_PARTICLES
+    ParticleConfig particles;
+
+    // LAYER_GAUGE
+    GaugeStyle gauge;
+    uint8_t gauge_w, gauge_h;
+    String value_key;
+    ColorRange range;
+
+    // LAYER_CLOCK
+    String clock_format; // "12h" or "24h"
+
+    // LAYER_NATIVE
+    bool native_large;   // true = 5x7, false = 3x5
+    uint8_t native_spacing; // px between chars
+
+    // LAYER_PIXELS
+    String pixels_pattern; // "week_dots", "bar", etc.
+    String pixels_data_key;
+    uint32_t pixels_color;
+    uint32_t pixels_dim_color;
+
+    // LAYER_GRADIENT
+    uint8_t grad_w, grad_h;       // size (0 = full screen)
+    String grad_direction;         // "horizontal", "vertical", "diagonal"
+    ColorRange grad_colors;        // color stops across the gradient
+
+    // Tweens (per-layer animation)
+    struct Tween {
+        String prop;       // "x", "y", "opacity"
+        float from, to;
+        uint16_t duration; // ms
+        String easing;     // "linear", "sine", "ease_in", "ease_out", "ease_in_out"
+        String loop;       // "none", "repeat", "pingpong"
+        uint16_t delay;    // ms before starting
+    };
+    std::vector<Tween> tweens;
 };
+
+// --- Screen ---
+
+struct Screen {
+    std::vector<Layer> layers;
+    uint32_t duration;
+    String data_url;  // shared data source for all layers
+};
+
+// --- Config ---
 
 struct Config {
     String config_url;
@@ -78,5 +169,6 @@ struct Config {
     int8_t timezone_offset;
     uint32_t scroll_speed;
     uint8_t transition_ms;
+    String buttons;  // "navigate" or "events"
     bool valid;
 };

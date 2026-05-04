@@ -9,6 +9,7 @@
 #include "config_manager.h"
 #include "sensors.h"
 #include "gauge.h"
+#include "particles.h"
 
 Display display;
 ConfigManager configMgr;
@@ -23,8 +24,8 @@ uint32_t lastScreenSwitch = 0, lastButtonCheck = 0;
 int currentScreen = 0;
 JsonDocument screenData;
 
-// Scroll state (reusable for both outgoing and incoming)
-struct ScrollState {
+// --- Per-layer state ---
+struct TextState {
     int16_t offset = 0;
     int8_t dir = 1;
     uint32_t pauseUntil = 0;
@@ -33,13 +34,24 @@ struct ScrollState {
     int16_t textW = 0;
     bool completedOnce = false;
     String resolved;
-    // Icon animation
-    uint8_t iconFrame = 0;
-    uint32_t lastIconStep = 0;
 };
 
-ScrollState scroll;       // current/incoming screen
-ScrollState prevScroll;   // outgoing screen (during transition)
+struct IconState {
+    uint8_t frame = 0;
+    uint32_t lastStep = 0;
+};
+
+struct ScreenState {
+    std::vector<TextState> textStates;
+    std::vector<IconState> iconStates;
+    std::vector<ParticleSystem> particleSystems;
+    uint32_t lastTick = 0;
+    uint32_t startTime = 0;
+    bool inited = false;
+};
+
+ScreenState currentState;
+ScreenState prevState;
 int prevScreenIdx = -1;
 JsonDocument prevScreenData;
 
@@ -49,11 +61,34 @@ bool transitioning = false;
 
 // Buttons
 bool btnLeftLast = HIGH, btnMidLast = HIGH, btnRightLast = HIGH;
+uint32_t lastNavTime = 0;
+#define NAV_COOLDOWN_MS 500
 
 #define SENSOR_READ_MS 2000
 #define BUTTON_CHECK_MS 50
 
+// Forward declarations
+void resetState(ScreenState& state);
+void switchScreen();
+
 // --- Buttons ---
+void navigatePrev() {
+    if (config.screens.empty() || millis() - lastNavTime < NAV_COOLDOWN_MS) return;
+    lastNavTime = millis();
+    transitioning = false;
+    prevScreenIdx = -1;
+    currentScreen = (currentScreen - 1 + config.screens.size()) % config.screens.size();
+    lastScreenSwitch = millis();
+    screenData.clear();
+    lastDataFetch = 0;
+    resetState(currentState);
+}
+
+void navigateNext() {
+    if (config.screens.empty() || millis() - lastNavTime < NAV_COOLDOWN_MS) return;
+    lastNavTime = millis();
+    switchScreen();
+}
 
 void postEvent(const char* event) {
     if (config.event_url.isEmpty() || WiFi.status() != WL_CONNECTED) return;
@@ -61,8 +96,7 @@ void postEvent(const char* event) {
     http.begin(config.event_url);
     http.setTimeout(2000);
     http.addHeader("Content-Type", "application/json");
-    String body = "{\"event\":\"" + String(event) + "\",\"screen\":" + currentScreen + "}";
-    http.POST(body);
+    http.POST("{\"event\":\"" + String(event) + "\",\"screen\":" + currentScreen + "}");
     http.end();
 }
 
@@ -70,21 +104,29 @@ void checkButtons() {
     bool l = digitalRead(BUTTON_LEFT);
     bool m = digitalRead(BUTTON_MID);
     bool r = digitalRead(BUTTON_RIGHT);
-    if (l == LOW && btnLeftLast == HIGH)  postEvent("left");
-    if (m == LOW && btnMidLast == HIGH)   postEvent("select");
-    if (r == LOW && btnRightLast == HIGH) postEvent("right");
+
+    if (l == LOW && btnLeftLast == HIGH) {
+        if (config.buttons == "navigate") navigatePrev();
+        postEvent("left");
+    }
+    if (m == LOW && btnMidLast == HIGH) {
+        postEvent("select");
+    }
+    if (r == LOW && btnRightLast == HIGH) {
+        if (config.buttons == "navigate") navigateNext();
+        postEvent("right");
+    }
+
     btnLeftLast = l; btnMidLast = m; btnRightLast = r;
 }
 
-// --- HTTP endpoints ---
-
+// --- HTTP ---
 void handleSensors() {
     JsonDocument doc;
     doc["temperature"] = round(sensors.data.temperature * 10.0) / 10.0;
     doc["humidity"] = round(sensors.data.humidity * 10.0) / 10.0;
     doc["light"] = (int)sensors.data.lightPct;
     doc["light_raw"] = (int)sensors.data.light;
-    doc["sensor"] = sensors.type != SENSOR_NONE;
     String out; serializeJson(doc, out);
     httpServer.send(200, "application/json", out);
 }
@@ -94,14 +136,12 @@ void handleStatus() {
     doc["uptime"] = millis() / 1000;
     doc["wifi"] = WiFi.RSSI();
     doc["ip"] = WiFi.localIP().toString();
-    doc["config_valid"] = config.valid;
     doc["screen"] = currentScreen;
     String out; serializeJson(doc, out);
     httpServer.send(200, "application/json", out);
 }
 
 // --- WiFi & Serial ---
-
 void setupWiFi() {
     prefs.begin("thinclock", true);
     wifiSSID = prefs.getString("ssid", "");
@@ -113,15 +153,11 @@ void setupWiFi() {
         Serial.println("No WiFi. Send: {\"ssid\":\"...\",\"pass\":\"...\",\"config_url\":\"...\"}");
         return;
     }
-
     WiFi.begin(wifiSSID.c_str(), wifiPass.c_str());
     Serial.printf("Connecting to %s", wifiSSID.c_str());
     uint32_t start = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
-        delay(250); Serial.print(".");
-    }
+    while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) { delay(250); Serial.print("."); }
     Serial.println(WiFi.status() == WL_CONNECTED ? " OK" : " FAIL");
-
     if (WiFi.status() == WL_CONNECTED) {
         Serial.printf("IP: %s\n", WiFi.localIP().toString().c_str());
         configTzTime("UTC0", "pool.ntp.org");
@@ -133,8 +169,7 @@ void setupWiFi() {
 
 void handleSerial() {
     if (!Serial.available()) return;
-    String line = Serial.readStringUntil('\n');
-    line.trim();
+    String line = Serial.readStringUntil('\n'); line.trim();
     if (line.isEmpty()) return;
     JsonDocument doc;
     if (deserializeJson(doc, line)) return;
@@ -146,189 +181,313 @@ void handleSerial() {
             prefs.putString("config_url", doc["config_url"].as<const char*>());
         prefs.end();
         Serial.println("Saved. Rebooting...");
-        delay(500);
-        ESP.restart();
+        delay(500); ESP.restart();
     }
 }
 
-// --- Rendering ---
+// --- Layer Rendering ---
 
-void showClock() {
-    struct tm t;
-    display.clear();
-    if (!getLocalTime(&t)) {
-        uint32_t s = millis() / 1000;
-        char buf[9];
-        snprintf(buf, sizeof(buf), "%02lu:%02lu", (s / 60) % 100, s % 60);
-        display.drawText(buf, 2, 0, 0x00AAFF);
+void initScreenState(ScreenState& state, Screen& scr) {
+    state.textStates.clear();
+    state.iconStates.clear();
+    state.particleSystems.clear();
+    state.lastTick = millis();
+    state.startTime = millis();
+    state.inited = true;
+
+    for (auto& layer : scr.layers) {
+        if (layer.type == LAYER_TEXT || layer.type == LAYER_CLOCK) {
+            state.textStates.push_back(TextState());
+        }
+        if (layer.type == LAYER_ICON) {
+            state.iconStates.push_back(IconState());
+        }
+        if (layer.type == LAYER_PARTICLES) {
+            ParticleSystem ps;
+            ps.init(layer.particles);
+            state.particleSystems.push_back(ps);
+        }
+    }
+}
+
+// --- Tween engine ---
+static float tweenEase(float t, const String& easing) {
+    if (easing == "sine") return 0.5f - 0.5f * cos(t * 3.14159f);
+    if (easing == "ease_in") return t * t;
+    if (easing == "ease_out") return 1.0f - (1.0f - t) * (1.0f - t);
+    if (easing == "ease_in_out") return t < 0.5f ? 2*t*t : 1 - 2*(1-t)*(1-t);
+    return t; // linear
+}
+
+static float evaluateTween(const Layer::Tween& tw, uint32_t elapsed) {
+    if (elapsed < tw.delay) return tw.from;
+    uint32_t active = elapsed - tw.delay;
+
+    float progress;
+    if (tw.loop == "repeat") {
+        progress = (float)(active % tw.duration) / tw.duration;
+    } else if (tw.loop == "pingpong") {
+        uint32_t cycle = active % (tw.duration * 2);
+        progress = (float)cycle / tw.duration;
+        if (progress > 1.0f) progress = 2.0f - progress;
     } else {
-        char buf[6];
-        if (config.time_format == "12h") {
-            int h = t.tm_hour % 12; if (h == 0) h = 12;
-            snprintf(buf, sizeof(buf), "%2d:%02d", h, t.tm_min);
-        } else {
-            snprintf(buf, sizeof(buf), "%02d:%02d", t.tm_hour, t.tm_min);
-        }
-        display.drawText(buf, 2, 0, 0x00AAFF);
+        progress = (float)active / tw.duration;
+        if (progress > 1.0f) progress = 1.0f;
     }
-    display.show();
+
+    float eased = tweenEase(progress, tw.easing);
+    return tw.from + (tw.to - tw.from) * eased;
 }
 
-// Render a screen with given scroll state (advances scroll each call)
-void renderScreenWithState(Screen& scr, ScrollState& ss, const JsonDocument& data) {
-    String text = scr.label;
-    if (!scr.data_url.isEmpty() && !data.isNull()) {
-        text = configMgr.resolvePlaceholders(scr.label, data);
+static void applyTweens(Layer& layer, uint32_t elapsed) {
+    for (auto& tw : layer.tweens) {
+        float val = evaluateTween(tw, elapsed);
+        if (tw.prop == "x") layer.x = (int16_t)val;
+        else if (tw.prop == "y") layer.y = (int16_t)val;
+        else if (tw.prop == "opacity") layer.opacity = (uint8_t)constrain((int)val, 0, 255);
     }
+}
 
-    // Icon lookup
-    Icon* icon = nullptr;
-    int16_t iconW = 0;
-    if (!scr.icon.isEmpty() && config.icons.count(scr.icon)) {
-        icon = &config.icons[scr.icon];
-        if (!icon->frames.empty() || icon->gauge != GAUGE_NONE) {
-            iconW = icon->width + 1;
-        }
-    }
+void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data) {
+    if (!state.inited) initScreenState(state, scr);
 
-    // Text changed — reinit scroll
-    if (text != ss.resolved) {
-        ss.resolved = text;
-        ss.textW = display.textWidth(ss.resolved);
-        ss.offset = 0;
-        ss.dir = 1;
-        ss.pauseUntil = 0;
-        ss.completedOnce = false;
-        ss.lastStep = millis();
-
-        int16_t startX = scr.text_x >= 0 ? scr.text_x : iconW;
-        bool needsScroll = (ss.textW + startX) > MATRIX_WIDTH;
-
-        if (scr.scroll == SCROLL_NONE) ss.mode = SCROLL_NONE;
-        else if (scr.scroll == SCROLL_LEFT || scr.scroll == SCROLL_BOUNCE) ss.mode = scr.scroll;
-        else ss.mode = needsScroll ? SCROLL_BOUNCE : SCROLL_NONE;
-    }
-
-    int16_t textX = scr.text_x >= 0 ? scr.text_x : iconW;
-    int16_t y = scr.text_y >= 0 ? scr.text_y : 0;
     uint32_t now = millis();
+    uint32_t dt = now - state.lastTick;
+    state.lastTick = now;
+
+    int textIdx = 0, iconIdx = 0, particleIdx = 0;
 
     display.clear();
 
-    // 1) Draw text first
-    if (ss.mode == SCROLL_NONE) {
-        display.drawText(ss.resolved, textX, y, scr.color);
+    for (auto& layer : scr.layers) {
+        // Apply tweens to layer properties
+        if (!layer.tweens.empty()) {
+            applyTweens(layer, now - state.startTime);
+        }
 
-    } else if (ss.mode == SCROLL_BOUNCE) {
-        display.drawText(ss.resolved, textX - ss.offset, y, scr.color);
-        display.applyEdgeFade(scr.fade_edge);
+        // Snapshot before layer for opacity blending
+        if (layer.opacity < 255) display.snapshotLayer();
 
-        if (now >= ss.pauseUntil && now - ss.lastStep >= scr.scroll_speed) {
-            ss.offset += ss.dir;
-            ss.lastStep = now;
-            int16_t maxOff = ss.textW + textX - MATRIX_WIDTH;
-            if (maxOff < 0) maxOff = 0;
-            if (ss.dir == 1 && ss.offset >= maxOff) {
-                ss.offset = maxOff; ss.dir = -1; ss.pauseUntil = now + 800;
-            } else if (ss.dir == -1 && ss.offset <= 0) {
-                ss.offset = 0; ss.dir = 1; ss.pauseUntil = now + 800;
-                ss.completedOnce = true;
+        switch (layer.type) {
+
+        case LAYER_PARTICLES: {
+            if (particleIdx < (int)state.particleSystems.size()) {
+                auto& ps = state.particleSystems[particleIdx];
+                ps.tick(dt);
+                ps.render(display);
+                particleIdx++;
             }
+            break;
         }
 
-    } else { // SCROLL_LEFT
-        // Start text just off the right edge of the visible area
-        int16_t entryX = MATRIX_WIDTH;
-        int16_t drawX = entryX - ss.offset;
-        display.drawText(ss.resolved, drawX, y, scr.color);
-        display.applyEdgeFade(scr.fade_edge);
+        case LAYER_ICON: {
+            if (layer.icon_name.isEmpty() || !config.icons.count(layer.icon_name)) break;
+            Icon& icon = config.icons[layer.icon_name];
+            if (icon.frames.empty()) break;
 
-        if (now - ss.lastStep >= scr.scroll_speed) {
-            ss.offset++;
-            ss.lastStep = now;
-            // Fully exited left (past icon zone)
-            int16_t exitX = icon ? -(int16_t)icon->width : 0;
-            if (drawX + ss.textW < exitX) {
-                ss.offset = 0;
-                ss.completedOnce = true;
+            IconState& is = state.iconStates[iconIdx++];
+            if (icon.fps > 0 && icon.frames.size() > 1) {
+                uint32_t frameMs = 1000 / icon.fps;
+                if (now - is.lastStep >= frameMs) {
+                    is.frame = (is.frame + 1) % icon.frames.size();
+                    is.lastStep = now;
+                }
             }
-        }
-    }
+            uint8_t fi = is.frame % icon.frames.size();
 
-    // 2) Clear icon zone and draw icon on top of text
-    if (icon && !icon->frames.empty()) {
-        display.clearRect(0, 0, icon->width, icon->height);
-
-        if (icon->fps > 0 && icon->frames.size() > 1) {
-            uint32_t frameMs = 1000 / icon->fps;
-            if (now - ss.lastIconStep >= frameMs) {
-                ss.iconFrame = (ss.iconFrame + 1) % icon->frames.size();
-                ss.lastIconStep = now;
+            if (icon.remap_key != 0 && !icon.remap_range.stops.empty() && !icon.remap_value_key.isEmpty()) {
+                float val = data[icon.remap_value_key.c_str()].as<float>();
+                uint32_t newColor = colorFromRange(icon.remap_range, val);
+                std::vector<uint8_t> remapped = icon.frames[fi];
+                remapIconColor(remapped, icon.remap_key, newColor);
+                display.drawSprite(remapped.data(), icon.width, icon.height, layer.x, layer.y);
+            } else {
+                display.drawSprite(icon.frames[fi].data(), icon.width, icon.height, layer.x, layer.y);
             }
+            break;
         }
-        uint8_t fi = ss.iconFrame % icon->frames.size();
 
-        // Color remap: replace key color with range-derived color
-        if (icon->remap_key != 0 && !icon->range.stops.empty() && !icon->value_key.isEmpty()) {
-            float val = data[icon->value_key.c_str()].as<float>();
-            uint32_t newColor = colorFromRange(icon->range, val);
-            std::vector<uint8_t> remapped = icon->frames[fi];
-            remapIconColor(remapped, icon->remap_key, newColor);
-            display.drawSprite(remapped.data(), icon->width, icon->height, 0, 0);
-        } else {
-            display.drawSprite(icon->frames[fi].data(), icon->width, icon->height, 0, 0);
+        case LAYER_TEXT: {
+            TextState& ts = state.textStates[textIdx++];
+            String text = layer.label;
+            if (!layer.data_url.isEmpty() && !data.isNull()) {
+                text = configMgr.resolvePlaceholders(layer.label, data);
+            } else if (!scr.data_url.isEmpty() && !data.isNull()) {
+                text = configMgr.resolvePlaceholders(layer.label, data);
+            }
+
+            if (text != ts.resolved) {
+                ts.resolved = text;
+                ts.textW = display.textWidth(ts.resolved);
+                ts.offset = 0; ts.dir = 1; ts.pauseUntil = 0;
+                ts.completedOnce = false; ts.lastStep = now;
+                bool needsScroll = (ts.textW + layer.x) > MATRIX_WIDTH;
+                if (layer.scroll == SCROLL_NONE) ts.mode = SCROLL_NONE;
+                else if (layer.scroll == SCROLL_LEFT || layer.scroll == SCROLL_BOUNCE) ts.mode = layer.scroll;
+                else ts.mode = needsScroll ? SCROLL_BOUNCE : SCROLL_NONE;
+            }
+
+            if (ts.mode == SCROLL_NONE) {
+                display.drawText(ts.resolved, layer.x, layer.y, layer.color);
+            } else if (ts.mode == SCROLL_BOUNCE) {
+                display.drawText(ts.resolved, layer.x - ts.offset, layer.y, layer.color);
+                display.applyEdgeFade(layer.fade_edge);
+                if (now >= ts.pauseUntil && now - ts.lastStep >= layer.scroll_speed) {
+                    ts.offset += ts.dir; ts.lastStep = now;
+                    int16_t maxOff = ts.textW + layer.x - MATRIX_WIDTH;
+                    if (maxOff < 0) maxOff = 0;
+                    if (ts.dir == 1 && ts.offset >= maxOff) { ts.offset = maxOff; ts.dir = -1; ts.pauseUntil = now + 800; }
+                    else if (ts.dir == -1 && ts.offset <= 0) { ts.offset = 0; ts.dir = 1; ts.pauseUntil = now + 800; ts.completedOnce = true; }
+                }
+            } else { // SCROLL_LEFT
+                int16_t drawX = MATRIX_WIDTH - ts.offset;
+                display.drawText(ts.resolved, drawX, layer.y, layer.color);
+                display.applyEdgeFade(layer.fade_edge);
+                if (now - ts.lastStep >= layer.scroll_speed) {
+                    ts.offset++; ts.lastStep = now;
+                    if (drawX + ts.textW < 0) { ts.offset = 0; ts.completedOnce = true; }
+                }
+            }
+            break;
         }
-    } else if (icon && icon->gauge != GAUGE_NONE) {
-        // Procedural gauge
-        display.clearRect(0, 0, icon->width, icon->height);
-        float val = 0;
-        if (!icon->value_key.isEmpty()) {
-            val = data[icon->value_key.c_str()].as<float>();
+
+        case LAYER_CLOCK: {
+            TextState& ts = state.textStates[textIdx++];
+            struct tm t;
+            char buf[6] = "??:??";
+            if (getLocalTime(&t)) {
+                if (layer.clock_format == "12h") {
+                    int h = t.tm_hour % 12; if (h == 0) h = 12;
+                    snprintf(buf, sizeof(buf), "%02d:%02d", h, t.tm_min);
+                } else {
+                    snprintf(buf, sizeof(buf), "%02d:%02d", t.tm_hour, t.tm_min);
+                }
+            }
+            ts.resolved = buf;
+            display.drawNativeText(ts.resolved, layer.x, layer.y, layer.color, layer.native_spacing, layer.native_large);
+            break;
         }
-        drawGauge(display, *icon, val, 0, 0);
-    }
+
+        case LAYER_NATIVE: {
+            String text = layer.label;
+            if (!layer.data_url.isEmpty() && !data.isNull()) {
+                text = configMgr.resolvePlaceholders(layer.label, data);
+            } else if (!scr.data_url.isEmpty() && !data.isNull()) {
+                text = configMgr.resolvePlaceholders(layer.label, data);
+            }
+            display.drawNativeText(text, layer.x, layer.y, layer.color, layer.native_spacing, layer.native_large);
+            break;
+        }
+
+        case LAYER_GAUGE: {
+            float val = 0;
+            if (!layer.value_key.isEmpty()) {
+                val = data[layer.value_key.c_str()].as<float>();
+            }
+            Icon gaugeIcon;
+            gaugeIcon.width = layer.gauge_w;
+            gaugeIcon.height = layer.gauge_h;
+            drawGauge(display, layer.gauge, layer.gauge_w, layer.gauge_h, layer.range, val, layer.x, layer.y);
+            break;
+        }
+
+        case LAYER_PIXELS: {
+            if (layer.pixels_pattern == "week_dots") {
+                // 7 day indicators, 2px each + 1px gap
+                int dayOfWeek = 0;
+                if (!layer.pixels_data_key.isEmpty()) {
+                    dayOfWeek = data[layer.pixels_data_key.c_str()].as<int>();
+                } else {
+                    struct tm t;
+                    if (getLocalTime(&t)) dayOfWeek = t.tm_wday; // 0=Sun
+                }
+                int16_t startX = layer.x;
+                for (int d = 0; d < 7; d++) {
+                    uint32_t c = (d == dayOfWeek) ? layer.pixels_color : layer.pixels_dim_color;
+                    int16_t dx = startX + d * 3;
+                    display.drawPixel(dx, layer.y, c);
+                    display.drawPixel(dx + 1, layer.y, c);
+                }
+            }
+            break;
+        }
+
+        case LAYER_GRADIENT: {
+            uint8_t gw = layer.grad_w > 0 ? layer.grad_w : MATRIX_WIDTH;
+            uint8_t gh = layer.grad_h > 0 ? layer.grad_h : MATRIX_HEIGHT;
+            for (uint8_t gy = 0; gy < gh; gy++) {
+                for (uint8_t gx = 0; gx < gw; gx++) {
+                    float t;
+                    if (layer.grad_direction == "vertical") {
+                        t = (float)gy / (gh - 1);
+                    } else if (layer.grad_direction == "diagonal") {
+                        t = ((float)gx / (gw - 1) + (float)gy / (gh - 1)) * 0.5f;
+                    } else { // horizontal
+                        t = (float)gx / (gw - 1);
+                    }
+                    float val = layer.grad_colors.min_val + t * (layer.grad_colors.max_val - layer.grad_colors.min_val);
+                    uint32_t c = colorFromRange(layer.grad_colors, val);
+                    display.drawPixel(layer.x + gx, layer.y + gy, c);
+                }
+            }
+            break;
+        }
+
+        } // switch
+
+        // Apply opacity blending after layer rendered
+        if (layer.opacity < 255) display.applyLayerOpacity(layer.opacity);
+    } // for layers
 }
 
-void resetScroll(ScrollState& ss) {
-    ss.offset = 0; ss.dir = 1; ss.pauseUntil = 0; ss.lastStep = 0;
-    ss.mode = SCROLL_NONE; ss.textW = 0; ss.completedOnce = false;
-    ss.resolved = ""; ss.iconFrame = 0; ss.lastIconStep = 0;
+// --- Screen management ---
+
+void resetState(ScreenState& state) {
+    state.inited = false;
+    state.textStates.clear();
+    state.iconStates.clear();
+    state.particleSystems.clear();
+}
+
+bool screenHasScrolling(ScreenState& state) {
+    for (auto& ts : state.textStates) {
+        if ((ts.mode == SCROLL_LEFT || ts.mode == SCROLL_BOUNCE) && !ts.completedOnce)
+            return true;
+    }
+    return false;
 }
 
 void switchScreen() {
-    // Save outgoing state
-    prevScroll = scroll;
+    prevState = currentState;
     prevScreenIdx = currentScreen;
     prevScreenData = screenData;
 
-    // Advance
     currentScreen = (currentScreen + 1) % config.screens.size();
     lastScreenSwitch = millis();
     screenData.clear();
     lastDataFetch = 0;
-    resetScroll(scroll);
+    resetState(currentState);
 
-    // Start transition (skip crossfade for banner screens - they start empty)
-    Screen& nextScr = config.screens[currentScreen];
-    if (nextScr.scroll == SCROLL_LEFT) {
-        transitioning = false;
-        transitionProgress = 255;
-        prevScreenIdx = -1;
-    } else {
-        transitioning = true;
-        transitionProgress = 0;
-    }
+    transitioning = true;
+    transitionProgress = 0;
+}
+
+// --- Fallback clock ---
+void showClock() {
+    struct tm t;
+    display.clear();
+    char buf[6] = "00:00";
+    if (getLocalTime(&t)) snprintf(buf, sizeof(buf), "%02d:%02d", t.tm_hour, t.tm_min);
+    else { uint32_t s = millis()/1000; snprintf(buf, sizeof(buf), "%02lu:%02lu", (s/60)%100, s%60); }
+    display.drawText(buf, 2, 0, 0x00AAFF);
+    display.show();
 }
 
 // --- Main ---
-
 void setup() {
-    Serial.begin(115200);
-    delay(500);
+    Serial.begin(115200); delay(500);
     Serial.println("\n[thinclock]");
-
-    pinMode(BUZZER_PIN, OUTPUT);
-    digitalWrite(BUZZER_PIN, LOW);
+    pinMode(BUZZER_PIN, OUTPUT); digitalWrite(BUZZER_PIN, LOW);
     pinMode(BUTTON_LEFT, INPUT_PULLUP);
     pinMode(BUTTON_MID, INPUT_PULLUP);
     pinMode(BUTTON_RIGHT, INPUT_PULLUP);
@@ -338,13 +497,11 @@ void setup() {
     display.drawText("BOOT", 1, 0, 0x004400);
     display.show();
 
-    sensors.begin();
-    sensors.read();
+    sensors.begin(); sensors.read();
     setupWiFi();
     config.valid = false;
     config.transition_ms = 8;
     config.time_format = "24h";
-    config.temp_unit = "C";
 }
 
 void loop() {
@@ -352,77 +509,81 @@ void loop() {
     httpServer.handleClient();
     uint32_t now = millis();
 
-    if (now - lastButtonCheck > BUTTON_CHECK_MS) { checkButtons(); lastButtonCheck = now; }
+    if (now - lastButtonCheck > BUTTON_CHECK_MS) { checkButtons(); lastButtonCheck = now; now = millis(); }
     if (now - lastSensorRead > SENSOR_READ_MS) { sensors.read(); lastSensorRead = now; }
 
-    // Config fetch
+    // Config
     if (!configURL.isEmpty() && WiFi.status() == WL_CONNECTED) {
         if (!config.valid || now - lastConfigFetch > CONFIG_POLL_MS) {
-            if (configMgr.fetchConfig(configURL, config)) {
-                display.setBrightness(config.brightness);
-                currentScreen = 0;
-                lastScreenSwitch = now;
-                resetScroll(scroll);
+            Config newCfg;
+            if (configMgr.fetchConfig(configURL, newCfg)) {
+                display.setBrightness(newCfg.brightness);
+                // Apply timezone
+                char tz[16];
+                int offset = -newCfg.timezone_offset; // POSIX is inverted
+                snprintf(tz, sizeof(tz), "UTC%+d", offset);
+                configTzTime(tz, "pool.ntp.org");
+                bool wasInvalid = !config.valid;
+                config = newCfg;
+                // Clamp screen index if config shrank
+                if (currentScreen >= (int)config.screens.size()) {
+                    currentScreen = 0;
+                    lastScreenSwitch = now;
+                    resetState(currentState);
+                } else if (wasInvalid) {
+                    currentScreen = 0;
+                    lastScreenSwitch = now;
+                    resetState(currentState);
+                }
             }
             lastConfigFetch = now;
         }
     }
 
-    // Fallback clock
-    if (!config.valid || config.screens.empty()) {
-        showClock();
-        delay(500);
-        return;
-    }
+    if (!config.valid || config.screens.empty()) { showClock(); delay(500); return; }
 
-    // Fetch data for current screen
+    // Fetch data
     Screen& scr = config.screens[currentScreen];
-    if (!scr.data_url.isEmpty() && (now - lastDataFetch > DATA_POLL_MS)) {
-        configMgr.fetchData(scr.data_url, screenData);
+    String dataUrl = scr.data_url;
+    if (dataUrl.isEmpty()) {
+        // Check if any text layer has its own data_url
+        for (auto& l : scr.layers) {
+            if (l.type == LAYER_TEXT && !l.data_url.isEmpty()) { dataUrl = l.data_url; break; }
+        }
+    }
+    if (!dataUrl.isEmpty() && (now - lastDataFetch > DATA_POLL_MS)) {
+        configMgr.fetchData(dataUrl, screenData);
         lastDataFetch = now;
     }
 
+    // Render
     if (transitioning && prevScreenIdx >= 0) {
-        // Wait for incoming screen to have data before starting crossfade
-        if (!scr.data_url.isEmpty() && screenData.isNull()) {
-            // Still waiting for first fetch — just show outgoing screen
+        if (!dataUrl.isEmpty() && screenData.isNull()) {
+            // Wait for data — keep showing outgoing
             display.renderToMain();
-            Screen& prevScr = config.screens[prevScreenIdx];
-            renderScreenWithState(prevScr, prevScroll, prevScreenData);
+            renderScreen(config.screens[prevScreenIdx], prevState, prevScreenData);
             display.show();
         } else {
-            // Render outgoing screen into prev_frame
             display.renderToPrev();
-            Screen& prevScr = config.screens[prevScreenIdx];
-            renderScreenWithState(prevScr, prevScroll, prevScreenData);
-
-            // Render incoming screen into render_buf
+            renderScreen(config.screens[prevScreenIdx], prevState, prevScreenData);
             display.renderToMain();
-            renderScreenWithState(scr, scroll, screenData);
-
-            // Blend and output
+            renderScreen(scr, currentState, screenData);
             transitionProgress += config.transition_ms;
             if (transitionProgress >= 255) {
-                transitioning = false;
-                prevScreenIdx = -1;
+                transitioning = false; prevScreenIdx = -1;
                 display.show();
             } else {
                 display.crossfade((uint8_t)transitionProgress);
             }
         }
     } else {
-        // Normal rendering
-        renderScreenWithState(scr, scroll, screenData);
+        renderScreen(scr, currentState, screenData);
         display.show();
     }
 
-    // Screen cycling
-    if (now - lastScreenSwitch > scr.duration) {
-        bool canSwitch = true;
-        if (scroll.mode == SCROLL_LEFT || scroll.mode == SCROLL_BOUNCE) {
-            canSwitch = scroll.completedOnce;
-        }
-        if (canSwitch) switchScreen();
+    // Screen cycling (only when not transitioning)
+    if (!transitioning && now - lastScreenSwitch > scr.duration) {
+        if (!screenHasScrolling(currentState)) switchScreen();
     }
 
     delay(20);
