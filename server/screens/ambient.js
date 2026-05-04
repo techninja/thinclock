@@ -1,5 +1,10 @@
 exports.name = 'Ambient Gradient';
 exports.enabled = true;
+exports.priority = 1;
+exports.tags = ['ambient', 'mood'];
+exports.schedule = {
+  hours: [18, 19, 20, 21, 22, 23],  // evening only
+};
 
 exports.screen = () => ({
   duration: 15000,

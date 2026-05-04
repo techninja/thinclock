@@ -1,5 +1,7 @@
 exports.name = 'Bouncing Balls';
 exports.enabled = true;
+exports.priority = 2;
+exports.tags = ['fun', 'ambient'];
 
 exports.screen = () => ({
   duration: 10000,

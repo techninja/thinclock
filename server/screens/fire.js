@@ -1,5 +1,7 @@
 exports.name = 'Fire';
 exports.enabled = true;
+exports.priority = 2;
+exports.tags = ['fun', 'ambient'];
 
 // Fire: dense particles rising from the bottom with warm colors.
 // Young particles are bright white/yellow (base of flame),

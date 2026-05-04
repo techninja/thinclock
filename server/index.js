@@ -46,7 +46,12 @@ ha.setup(app, config);
 // --- Register screen routes (once at startup) ---
 registry.registerRoutes(app, config);
 
-// --- Build config endpoint ---
+// Log active screens
+const active = registry.getActiveModules();
+console.log(`\nActive screens (${active.length}/${registry.modules.length}):`);
+active.forEach((m, i) => console.log(`  ${i}: ${m.name}`));
+
+// --- Device config endpoint ---
 app.get('/config', (req, res) => {
   const { screens, icons } = registry.build(app, config);
 
@@ -66,34 +71,67 @@ app.get('/config', (req, res) => {
   });
 });
 
-// --- Management endpoints ---
+// --- Management API ---
 
-// List screens with enable/disable status
+// List all screens with status
 app.get('/screens', (req, res) => {
   res.json(registry.list());
 });
 
 // Enable/disable a screen
-app.post('/screens/:file', (req, res) => {
-  const { enabled } = req.body;
-  registry.setEnabled(req.params.file, enabled);
-  console.log(`[screens] ${req.params.file} → ${enabled ? 'enabled' : 'disabled'}`);
-  res.json({ ok: true });
+app.post('/screens/:id/enable', (req, res) => {
+  registry.setEnabled(req.params.id, true);
+  console.log(`[screens] ${req.params.id} → enabled`);
+  res.json({ ok: true, active: registry.getActiveModules().map(m => m.name) });
 });
 
-// Button event callback
+app.post('/screens/:id/disable', (req, res) => {
+  registry.setEnabled(req.params.id, false);
+  console.log(`[screens] ${req.params.id} → disabled`);
+  res.json({ ok: true, active: registry.getActiveModules().map(m => m.name) });
+});
+
+// Get currently active rotation
+app.get('/active', (req, res) => {
+  const active = registry.getActiveModules();
+  res.json(active.map((m, i) => ({
+    index: i,
+    id: m._id,
+    name: m.name,
+    contextAction: m.contextAction || 'pause',
+  })));
+});
+
+// --- Button event handling ---
+let paused = false;
+
 app.post('/event', (req, res) => {
   const { event, screen } = req.body;
   console.log(`[event] button=${event} screen=${screen}`);
-  res.json({ ok: true });
+
+  if (event === 'select') {
+    // Middle button: context action
+    const action = registry.getContextAction(screen);
+    console.log(`[action] screen=${screen} action=${action}`);
+
+    if (action === 'pause') {
+      paused = !paused;
+      console.log(`[action] rotation ${paused ? 'paused' : 'resumed'}`);
+    }
+    // Custom actions can be handled here per-screen
+    res.json({ ok: true, action, paused });
+  } else {
+    res.json({ ok: true });
+  }
 });
 
 // --- Start ---
 app.listen(PORT, () => {
-  console.log(`\nthinclock server`);
-  console.log(`================`);
+  console.log(`\nthinclock server (mode: ${registry.mode})`);
+  console.log(`${'='.repeat(40)}`);
   console.log(`Config:   ${BASE}/config`);
   console.log(`Screens:  ${BASE}/screens`);
+  console.log(`Active:   ${BASE}/active`);
   console.log(`Events:   ${BASE}/event`);
   console.log(`\nSend to device serial:`);
   console.log(`{"ssid":"${process.env.WIFI_SSID}","pass":"${process.env.WIFI_PASS}","config_url":"${BASE}/config"}`);

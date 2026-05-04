@@ -1,5 +1,7 @@
 exports.name = 'Sensor Dashboard';
 exports.enabled = true;
+exports.priority = 8;
+exports.tags = ['utility', 'sensors'];
 
 exports.screen = () => ({
   duration: 8000,

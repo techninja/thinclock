@@ -1,5 +1,10 @@
 exports.name = 'Fireworks';
 exports.enabled = true;
+exports.priority = 3;
+exports.tags = ['fun', 'seasonal', 'holiday'];
+exports.schedule = {
+  dateRange: [701, 704],  // July 1-4
+};
 
 exports.screen = () => ({
   duration: 12000,

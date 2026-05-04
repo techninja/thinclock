@@ -1,5 +1,7 @@
 exports.name = 'Water Fill';
 exports.enabled = true;
+exports.priority = 1;
+exports.tags = ['fun', 'ambient'];
 
 // Water drops fall and accumulate at the bottom.
 // Uses a mask that builds up as the "water level" — but since we can't

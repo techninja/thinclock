@@ -2,6 +2,11 @@ const { makeIcon, makeLine } = require('../lib/icons');
 
 exports.name = 'Winter Scene';
 exports.enabled = true;
+exports.priority = 3;
+exports.tags = ['seasonal', 'ambient', 'holiday'];
+exports.schedule = {
+  months: [11, 12, 1, 2],  // Nov through Feb
+};
 
 exports.icons = {
   snowman: {

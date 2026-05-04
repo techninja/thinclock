@@ -1,5 +1,7 @@
 exports.name = 'Rain';
-exports.enabled = true;
+exports.enabled = false;  // use weather screen's dynamic rain instead
+exports.priority = 2;
+exports.tags = ['ambient', 'weather'];
 
 exports.screen = () => ({
   duration: 10000,

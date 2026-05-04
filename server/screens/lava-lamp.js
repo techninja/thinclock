@@ -1,5 +1,7 @@
 exports.name = 'Lava Lamp';
 exports.enabled = true;
+exports.priority = 1;
+exports.tags = ['fun', 'ambient'];
 
 exports.screen = () => ({
   duration: 10000,

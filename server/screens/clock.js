@@ -2,6 +2,9 @@ const { makeIcon } = require('../lib/icons');
 
 exports.name = 'Awtrix Clock';
 exports.enabled = true;
+exports.priority = 10;  // always show first
+exports.tags = ['utility', 'clock'];
+exports.contextAction = 'pause';
 
 exports.icons = {
   calendar: {

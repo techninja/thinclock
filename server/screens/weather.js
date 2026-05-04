@@ -2,6 +2,9 @@ const { makeIcon } = require('../lib/icons');
 
 exports.name = 'Weather';
 exports.enabled = true;
+exports.priority = 9;
+exports.tags = ['utility', 'weather'];
+exports.contextAction = 'refresh';
 
 exports.icons = {
   weather_sun: {
