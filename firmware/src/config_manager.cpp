@@ -173,6 +173,7 @@ bool ConfigManager::fetchConfig(const String& url, Config& cfg) {
     cfg.temp_unit = settings["temp_unit"] | "C";
     cfg.transition_ms = settings["transition"] | 8;
     cfg.buttons = settings["buttons"] | "navigate";
+    cfg.allow_beep = settings["allow_beep"] | true;
 
     // Screens
     for (JsonObject s : doc["screens"].as<JsonArray>()) {

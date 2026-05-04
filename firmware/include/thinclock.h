@@ -162,7 +162,10 @@ struct Screen {
 
 struct Notification {
     std::vector<Layer> layers;
-    uint32_t color;     // indicator dot color
+    uint32_t color;
+    uint8_t beep;       // 0=none, 1=single, 2=alert (repeating)
+    uint32_t alertInterval; // ms between alert beeps
+    uint32_t lastBeep;
     bool active;
 };
 
@@ -179,6 +182,7 @@ struct Config {
     int8_t timezone_offset;
     uint32_t scroll_speed;
     uint8_t transition_ms;
-    String buttons;  // "navigate" or "events"
+    String buttons;
+    bool allow_beep;
     bool valid;
 };

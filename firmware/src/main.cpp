@@ -81,6 +81,27 @@ uint32_t lastNavTime = 0;
 #define SENSOR_READ_MS 2000
 #define BUTTON_CHECK_MS 50
 
+// --- Buzzer ---
+void beepOnce(uint16_t freq = 2000, uint16_t duration = 80) {
+    if (!config.allow_beep) return;
+    ledcSetup(0, freq, 8);
+    ledcAttachPin(BUZZER_PIN, 0);
+    ledcWrite(0, 128);
+    delay(duration);
+    ledcWrite(0, 0);
+    ledcDetachPin(BUZZER_PIN);
+    pinMode(BUZZER_PIN, OUTPUT);
+    digitalWrite(BUZZER_PIN, LOW);
+}
+
+void beepTriple() {
+    if (!config.allow_beep) return;
+    for (int i = 0; i < 3; i++) {
+        beepOnce(2500, 60);
+        if (i < 2) delay(80);
+    }
+}
+
 // Forward declarations
 void resetState(ScreenState& state);
 void switchScreen();
@@ -223,8 +244,22 @@ void handleNotify() {
         }
         // Full layers array
         // (simplified: just support text for now)
+
+        // Beep config
+        const char* beepStr = doc["beep"] | "single";
+        if (strcmp(beepStr, "none") == 0 || strcmp(beepStr, "false") == 0) n.beep = 0;
+        else if (strcmp(beepStr, "alert") == 0) n.beep = 2;
+        else n.beep = 1;  // default: single
+        n.alertInterval = doc["alert_interval"] | 30000;  // default 30s
+        n.lastBeep = 0;
+
         notifCount++;
-        Serial.printf("[notif] added #%d\n", notifCount);
+        Serial.printf("[notif] added #%d beep=%d\n", notifCount, n.beep);
+
+        // Immediate beep on receive
+        if (n.beep == 1) beepOnce();
+        else if (n.beep == 2) beepTriple();
+
         httpServer.send(200, "application/json", "{\"ok\":true}");
     } else if (httpServer.method() == HTTP_DELETE) {
         // Clear all
@@ -717,6 +752,18 @@ void loop() {
 
     // Single show per frame
     display.show();
+
+    // Alert beep check (repeating notifications)
+    if (!notifViewerOpen) {
+        for (int i = 0; i < notifCount; i++) {
+            if (notifications[i].beep == 2 && notifications[i].active) {
+                if (now - notifications[i].lastBeep >= notifications[i].alertInterval) {
+                    beepTriple();
+                    notifications[i].lastBeep = now;
+                }
+            }
+        }
+    }
 
     // Screen cycling (only when not transitioning)
     if (!transitioning && now - lastScreenSwitch > scr.duration) {
