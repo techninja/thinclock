@@ -153,7 +153,17 @@ struct Layer {
 struct Screen {
     std::vector<Layer> layers;
     uint32_t duration;
-    String data_url;  // shared data source for all layers
+    String data_url;
+};
+
+// --- Notifications ---
+
+#define MAX_NOTIFICATIONS 8
+
+struct Notification {
+    std::vector<Layer> layers;
+    uint32_t color;     // indicator dot color
+    bool active;
 };
 
 // --- Config ---

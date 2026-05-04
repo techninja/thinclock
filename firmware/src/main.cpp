@@ -59,6 +59,20 @@ JsonDocument prevScreenData;
 uint16_t transitionProgress = 255;
 bool transitioning = false;
 
+// Notifications
+Notification notifications[MAX_NOTIFICATIONS];
+int notifCount = 0;
+bool notifViewerOpen = false;
+int notifViewerIdx = 0;
+int16_t notifSlideY = -8;
+ScreenState notifState;
+JsonDocument notifData;
+int16_t notifScrollX = 0;
+uint32_t notifLastScroll = 0;
+uint32_t notifOpenTime = 0;
+#define NOTIF_TIMEOUT_MS 60000
+#define NOTIF_SCROLL_SPEED 45
+
 // Buttons
 bool btnLeftLast = HIGH, btnMidLast = HIGH, btnRightLast = HIGH;
 uint32_t lastNavTime = 0;
@@ -106,14 +120,52 @@ void checkButtons() {
     bool r = digitalRead(BUTTON_RIGHT);
 
     if (l == LOW && btnLeftLast == HIGH) {
-        if (config.buttons == "navigate") navigatePrev();
+        if (notifViewerOpen) {
+            // Previous notification
+            if (notifViewerIdx > 0) {
+                notifViewerIdx--;
+                notifSlideY = -8;
+                notifScrollX = 0;
+                notifOpenTime = millis();
+            }
+        } else {
+            if (config.buttons == "navigate") navigatePrev();
+        }
         postEvent("left");
     }
     if (m == LOW && btnMidLast == HIGH) {
+        if (notifViewerOpen) {
+            // Close viewer
+            notifViewerOpen = false;
+            notifSlideY = -8;
+        } else if (notifCount > 0) {
+            // Open viewer
+            notifViewerOpen = true;
+            notifViewerIdx = 0;
+            notifSlideY = -8;
+            notifScrollX = 0;
+            notifOpenTime = millis();
+        }
         postEvent("select");
     }
     if (r == LOW && btnRightLast == HIGH) {
-        if (config.buttons == "navigate") navigateNext();
+        if (notifViewerOpen) {
+            // Next notification or close
+            notifViewerIdx++;
+            if (notifViewerIdx >= notifCount) {
+                // Dismiss all and close
+                notifViewerOpen = false;
+                notifSlideY = -8;
+                notifCount = 0;
+                for (auto& n : notifications) n.active = false;
+            } else {
+                notifSlideY = -8;
+                notifScrollX = 0;
+                notifOpenTime = millis();
+            }
+        } else {
+            if (config.buttons == "navigate") navigateNext();
+        }
         postEvent("right");
     }
 
@@ -141,6 +193,52 @@ void handleStatus() {
     httpServer.send(200, "application/json", out);
 }
 
+void handleNotify() {
+    if (httpServer.method() == HTTP_POST) {
+        // Add notification: POST /notify {"color":"FF0000","layers":[...]}
+        if (notifCount >= MAX_NOTIFICATIONS) {
+            httpServer.send(429, "application/json", "{\"error\":\"full\"}");
+            return;
+        }
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, httpServer.arg("plain"));
+        if (err) { httpServer.send(400, "application/json", "{\"error\":\"parse\"}"); return; }
+
+        Notification& n = notifications[notifCount];
+        n.active = true;
+        n.color = strtoul((doc["color"] | "FFAA00"), NULL, 16);
+        n.layers.clear();
+        // Simple text notification shorthand
+        if (doc["text"].is<const char*>()) {
+            Layer l;
+            l.type = LAYER_TEXT;
+            l.label = doc["text"].as<const char*>();
+            l.x = 0; l.y = 0;
+            l.color = strtoul((doc["text_color"] | "FFFFFF"), NULL, 16);
+            l.scroll = SCROLL_AUTO;
+            l.scroll_speed = 50;
+            l.fade_edge = 2;
+            l.opacity = 255;
+            n.layers.push_back(l);
+        }
+        // Full layers array
+        // (simplified: just support text for now)
+        notifCount++;
+        Serial.printf("[notif] added #%d\n", notifCount);
+        httpServer.send(200, "application/json", "{\"ok\":true}");
+    } else if (httpServer.method() == HTTP_DELETE) {
+        // Clear all
+        notifCount = 0;
+        notifViewerOpen = false;
+        for (auto& n : notifications) n.active = false;
+        httpServer.send(200, "application/json", "{\"ok\":true}");
+    } else {
+        // GET: return count
+        String out = "{\"count\":" + String(notifCount) + "}";
+        httpServer.send(200, "application/json", out);
+    }
+}
+
 // --- WiFi & Serial ---
 void setupWiFi() {
     prefs.begin("thinclock", true);
@@ -163,6 +261,7 @@ void setupWiFi() {
         configTzTime("UTC0", "pool.ntp.org");
         httpServer.on("/sensors", handleSensors);
         httpServer.on("/status", handleStatus);
+        httpServer.on("/notify", handleNotify);
         httpServer.begin();
     }
 }
@@ -559,10 +658,8 @@ void loop() {
     // Render
     if (transitioning && prevScreenIdx >= 0) {
         if (!dataUrl.isEmpty() && screenData.isNull()) {
-            // Wait for data — keep showing outgoing
             display.renderToMain();
             renderScreen(config.screens[prevScreenIdx], prevState, prevScreenData);
-            display.show();
         } else {
             display.renderToPrev();
             renderScreen(config.screens[prevScreenIdx], prevState, prevScreenData);
@@ -571,15 +668,55 @@ void loop() {
             transitionProgress += config.transition_ms;
             if (transitionProgress >= 255) {
                 transitioning = false; prevScreenIdx = -1;
-                display.show();
             } else {
                 display.crossfade((uint8_t)transitionProgress);
             }
         }
     } else {
         renderScreen(scr, currentState, screenData);
-        display.show();
     }
+
+    // --- Notification overlay (into render buffer before final show) ---
+    if (notifViewerOpen && notifViewerIdx < notifCount) {
+        if (now - notifOpenTime > NOTIF_TIMEOUT_MS) {
+            notifViewerOpen = false;
+            notifSlideY = -8;
+        } else {
+            display.fadeAll(50);
+            if (notifSlideY < 0) notifSlideY += 1;
+            uint32_t borderColor = notifications[notifViewerIdx].color;
+            for (int16_t bx = 0; bx < MATRIX_WIDTH; bx++) {
+                display.drawPixel(bx, max((int16_t)0, notifSlideY), borderColor);
+            }
+            if (notifSlideY >= 0) {
+                Notification& n = notifications[notifViewerIdx];
+                for (auto& l : n.layers) {
+                    if (l.type == LAYER_TEXT) {
+                        int16_t textW = display.nativeTextWidth(l.label);
+                        int16_t textY = notifSlideY + 2;
+                        if (textW <= MATRIX_WIDTH) {
+                            display.drawNativeText(l.label, (MATRIX_WIDTH - textW) / 2, textY, l.color, 1, false);
+                        } else {
+                            int16_t drawX = MATRIX_WIDTH - notifScrollX;
+                            display.drawNativeText(l.label, drawX, textY, l.color, 1, false);
+                            if (now - notifLastScroll >= NOTIF_SCROLL_SPEED) {
+                                notifScrollX++;
+                                notifLastScroll = now;
+                                if (drawX + textW < 0) notifScrollX = 0;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else if (notifCount > 0 && !notifViewerOpen) {
+        for (int i = 0; i < notifCount && i < 3; i++) {
+            display.drawPixel(MATRIX_WIDTH - 1 - (i * 2), 0, notifications[i].color);
+        }
+    }
+
+    // Single show per frame
+    display.show();
 
     // Screen cycling (only when not transitioning)
     if (!transitioning && now - lastScreenSwitch > scr.duration) {

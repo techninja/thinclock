@@ -84,6 +84,26 @@ int16_t Display::textWidth(const String& text) {
     return (int16_t)w;
 }
 
+int16_t Display::nativeTextWidth(const String& text, uint8_t spacing, bool large) {
+    int16_t w = 0;
+    uint8_t charW = large ? 5 : 3;
+    for (size_t i = 0; i < text.length(); i++) {
+        char ch = text[i];
+        if ((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
+            w += charW + spacing;
+        } else if (ch == ':' || ch == '.' || ch == '!') {
+            w += 1 + spacing;
+        } else if (ch == ' ') {
+            w += 2;
+        } else if (ch == '%') {
+            w += 3 + spacing;
+        } else {
+            w += 2;
+        }
+    }
+    return w > 0 ? w - spacing : 0; // remove trailing spacing
+}
+
 void Display::applyEdgeFade(uint8_t fadePixels) {
     if (fadePixels == 0) return;
     for (uint8_t f = 0; f < fadePixels; f++) {
@@ -131,10 +151,10 @@ void Display::applyLayerOpacity(uint8_t opacity) {
 }
 
 void Display::crossfade(uint8_t progress) {
+    // Blend prev_frame + render_buf into render_buf
     for (uint16_t i = 0; i < NUM_LEDS; i++) {
-        leds[i] = blend(prev_frame[i], render_buf[i], progress);
+        render_buf[i] = blend(prev_frame[i], render_buf[i], progress);
     }
-    FastLED.show();
 }
 
 void Display::drawSprite(const uint8_t* data, uint8_t w, uint8_t h, int16_t x, int16_t y) {
@@ -165,6 +185,36 @@ static const uint8_t FONT_3X5[][3] = {
     {0x01,0x01,0x1F}, // 7
     {0x1F,0x15,0x1F}, // 8
     {0x17,0x15,0x1F}, // 9
+};
+
+// 3x5 alphabet: A-Z
+static const uint8_t FONT_3X5_ALPHA[][3] = {
+    {0x1E,0x05,0x1E}, // A
+    {0x1F,0x15,0x0A}, // B
+    {0x0E,0x11,0x11}, // C
+    {0x1F,0x11,0x0E}, // D
+    {0x1F,0x15,0x11}, // E
+    {0x1F,0x05,0x01}, // F
+    {0x0E,0x11,0x19}, // G
+    {0x1F,0x04,0x1F}, // H
+    {0x11,0x1F,0x11}, // I
+    {0x08,0x10,0x0F}, // J
+    {0x1F,0x04,0x1B}, // K
+    {0x1F,0x10,0x10}, // L
+    {0x1F,0x02,0x1F}, // M
+    {0x1F,0x06,0x1F}, // N
+    {0x0E,0x11,0x0E}, // O
+    {0x1F,0x05,0x02}, // P
+    {0x0E,0x19,0x1E}, // Q
+    {0x1F,0x05,0x1A}, // R
+    {0x12,0x15,0x09}, // S
+    {0x01,0x1F,0x01}, // T
+    {0x0F,0x10,0x0F}, // U
+    {0x07,0x18,0x07}, // V
+    {0x1F,0x08,0x1F}, // W
+    {0x1B,0x04,0x1B}, // X
+    {0x03,0x1C,0x03}, // Y
+    {0x19,0x15,0x13}, // Z
 };
 
 // 5x7 font: columns stored as bitmask, LSB = top row
@@ -219,6 +269,23 @@ int16_t Display::drawNativeText(const String& text, int16_t x, int16_t y, uint32
         if (ch >= '0' && ch <= '9') {
             drawDigit(cx, y, ch - '0', color, large);
             cx += charW + spacing;
+        } else if (ch >= 'A' && ch <= 'Z' && !large) {
+            for (int col = 0; col < 3; col++) {
+                uint8_t colData = FONT_3X5_ALPHA[ch - 'A'][col];
+                for (int row = 0; row < 5; row++) {
+                    if (colData & (1 << row)) drawPixel(cx + col, y + row, color);
+                }
+            }
+            cx += charW + spacing;
+        } else if (ch >= 'a' && ch <= 'z' && !large) {
+            // Render lowercase as uppercase
+            for (int col = 0; col < 3; col++) {
+                uint8_t colData = FONT_3X5_ALPHA[ch - 'a'][col];
+                for (int row = 0; row < 5; row++) {
+                    if (colData & (1 << row)) drawPixel(cx + col, y + row, color);
+                }
+            }
+            cx += charW + spacing;
         } else if (ch == ':') {
             drawColon(cx, y, color, large);
             cx += 1 + spacing;
@@ -227,21 +294,25 @@ int16_t Display::drawNativeText(const String& text, int16_t x, int16_t y, uint32
         } else if (ch == '.') {
             drawPixel(cx, y + (large ? 6 : 4), color);
             cx += 1 + spacing;
+        } else if (ch == '!') {
+            drawPixel(cx, y, color);
+            drawPixel(cx, y + 1, color);
+            drawPixel(cx, y + 2, color);
+            drawPixel(cx, y + 4, color);
+            cx += 1 + spacing;
         } else if (ch == '%') {
-            // Tiny % glyph
             drawPixel(cx, y, color);
             drawPixel(cx + 2, y + (large ? 6 : 4), color);
             drawPixel(cx + 1, y + (large ? 3 : 2), color);
             cx += 3 + spacing;
         } else if (ch == 'F' || ch == 'C') {
-            // Tiny degree unit
             drawPixel(cx, y, color);
             drawPixel(cx + 1, y, color);
             drawPixel(cx, y + 1, color);
             cx += 3 + spacing;
         } else {
-            cx += 2; // unknown = small space
+            cx += 2;
         }
     }
-    return cx - x; // total width drawn
+    return cx - x;
 }
