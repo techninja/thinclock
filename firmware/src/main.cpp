@@ -79,8 +79,27 @@ uint32_t timerBreathPhase = 0;
 
 // Buttons
 bool btnLeftLast = HIGH, btnMidLast = HIGH, btnRightLast = HIGH;
+uint32_t btnLeftDown = 0, btnMidDown = 0, btnRightDown = 0;
+bool btnLeftLongFired = false, btnMidLongFired = false, btnRightLongFired = false;
 uint32_t lastNavTime = 0;
 #define NAV_COOLDOWN_MS 500
+#define LONG_PRESS_MS 500
+#define BEEP_DOWN_FREQ 1800
+#define BEEP_DOWN_DUR 20
+#define BEEP_SHORT_FREQ 2200
+#define BEEP_SHORT_DUR 30
+#define BEEP_LONG_FREQ 1200
+#define BEEP_LONG_DUR 50
+
+// LDR "button" (cover sensor to trigger)
+bool ldrCovered = false;
+uint32_t ldrCoverStart = 0;
+#define LDR_COVER_THRESHOLD 50   // raw analog value considered "covered"
+#define LDR_COVER_MIN_MS 200     // must be covered at least this long
+#define LDR_COOLDOWN_MS 1000     // cooldown after trigger
+uint32_t lastLdrTrigger = 0;
+bool timerPaused = false;
+uint32_t timerPausedRemaining = 0;
 
 #define SENSOR_READ_MS 2000
 #define BUTTON_CHECK_MS 50
@@ -109,6 +128,7 @@ void beepTriple() {
 // Forward declarations
 void resetState(ScreenState& state);
 void switchScreen();
+void postEvent(const char* event);
 
 // --- Buttons ---
 void navigatePrev() {
@@ -129,6 +149,38 @@ void navigateNext() {
     switchScreen();
 }
 
+// --- LDR "button" ---
+void checkLDR() {
+    uint16_t ldr = analogRead(LDR_PIN);
+    uint32_t now = millis();
+
+    if (ldr < LDR_COVER_THRESHOLD) {
+        if (!ldrCovered) {
+            ldrCovered = true;
+            ldrCoverStart = now;
+        } else if (now - ldrCoverStart >= LDR_COVER_MIN_MS && now - lastLdrTrigger >= LDR_COOLDOWN_MS) {
+            // Trigger! Pause/resume timer
+            lastLdrTrigger = now;
+            if (timer.active && !timer.fired) {
+                if (timerPaused) {
+                    // Resume: set new endTime based on remaining
+                    timer.endTime = millis() + timerPausedRemaining;
+                    timerPaused = false;
+                    beepOnce(1800, 40);
+                } else {
+                    // Pause: save remaining
+                    timerPausedRemaining = timer.endTime - millis();
+                    timerPaused = true;
+                    beepOnce(1200, 40);
+                }
+            }
+            postEvent("ldr_cover");
+        }
+    } else {
+        ldrCovered = false;
+    }
+}
+
 void postEvent(const char* event) {
     if (config.event_url.isEmpty() || WiFi.status() != WL_CONNECTED) return;
     HTTPClient http;
@@ -143,16 +195,28 @@ void checkButtons() {
     bool l = digitalRead(BUTTON_LEFT);
     bool m = digitalRead(BUTTON_MID);
     bool r = digitalRead(BUTTON_RIGHT);
+    uint32_t now = millis();
 
+    // --- LEFT ---
     if (l == LOW && btnLeftLast == HIGH) {
+        btnLeftDown = now; btnLeftLongFired = false;
+        beepOnce(BEEP_DOWN_FREQ, BEEP_DOWN_DUR);
+    }
+    if (l == LOW && !btnLeftLongFired && now - btnLeftDown >= LONG_PRESS_MS) {
+        btnLeftLongFired = true;
+        beepOnce(BEEP_LONG_FREQ, BEEP_LONG_DUR);
+        // Long left: (reserved for future use)
+        postEvent("left_long");
+    }
+    if (l == HIGH && btnLeftLast == LOW && !btnLeftLongFired) {
+        beepOnce(BEEP_SHORT_FREQ, BEEP_SHORT_DUR);
+        // Short left
         if (notifViewerOpen) {
-            // Previous: go back toward timer
             if (notifViewerIdx > 0) {
                 notifViewerIdx--;
             } else if (notifViewerIdx == 0 && timer.active) {
                 notifViewerIdx = -1;
             } else if (notifViewerIdx == -1 && timer.fired) {
-                // Dismiss fired timer
                 timer.active = false;
                 timer.fired = false;
                 notifViewerOpen = false;
@@ -160,32 +224,74 @@ void checkButtons() {
             }
             notifSlideY = -8;
             notifScrollX = 0;
-            notifOpenTime = millis();
+            notifOpenTime = now;
         } else {
             if (config.buttons == "navigate") navigatePrev();
         }
         postEvent("left");
     }
+
+    // --- MIDDLE ---
     if (m == LOW && btnMidLast == HIGH) {
-        if (notifViewerOpen) {
-            // Close viewer (doesn't dismiss)
+        btnMidDown = now; btnMidLongFired = false;
+        beepOnce(BEEP_DOWN_FREQ, BEEP_DOWN_DUR);
+    }
+    if (m == LOW && !btnMidLongFired && now - btnMidDown >= LONG_PRESS_MS) {
+        btnMidLongFired = true;
+        beepOnce(BEEP_LONG_FREQ, BEEP_LONG_DUR);
+        // Long middle: context action OR cancel timer if in viewer
+        if (notifViewerOpen && notifViewerIdx == -1 && timer.active) {
+            // Cancel timer
+            timer.active = false;
+            timer.fired = false;
+            timerPaused = false;
             notifViewerOpen = false;
             notifSlideY = -8;
-        } else if (timer.active || notifCount > 0) {
-            // Open viewer: start at timer if active, else first notification
+            beepOnce(1000, 60); delay(80); beepOnce(600, 80);
+        } else {
+            timerPaused = false;
+            postEvent("select_long");
+            lastConfigFetch = 0; // force config refresh
+        }
+    }
+    if (m == HIGH && btnMidLast == LOW && !btnMidLongFired) {
+        beepOnce(BEEP_SHORT_FREQ, BEEP_SHORT_DUR);
+        // Short middle
+        if (notifViewerOpen) {
+            // Just close viewer
+            notifViewerOpen = false;
+            notifSlideY = -8;
+        } else if (notifCount > 0 || timer.active) {
+            // Dot showing: open viewer
             notifViewerOpen = true;
             notifViewerIdx = timer.active ? -1 : 0;
             notifSlideY = -8;
             notifScrollX = 0;
-            notifOpenTime = millis();
+            notifOpenTime = now;
+        } else {
+            // No dots: context action
+            timerPaused = false;
+            postEvent("select");
+            lastConfigFetch = 0; // force config refresh
         }
-        postEvent("select");
     }
+
+    // --- RIGHT ---
     if (r == LOW && btnRightLast == HIGH) {
+        btnRightDown = now; btnRightLongFired = false;
+        beepOnce(BEEP_DOWN_FREQ, BEEP_DOWN_DUR);
+    }
+    if (r == LOW && !btnRightLongFired && now - btnRightDown >= LONG_PRESS_MS) {
+        btnRightLongFired = true;
+        beepOnce(BEEP_LONG_FREQ, BEEP_LONG_DUR);
+        // Long right: (reserved for future use)
+        postEvent("right_long");
+    }
+    if (r == HIGH && btnRightLast == LOW && !btnRightLongFired) {
+        beepOnce(BEEP_SHORT_FREQ, BEEP_SHORT_DUR);
+        // Short right
         if (notifViewerOpen) {
-            // Next item
             if (notifViewerIdx == -1) {
-                // From timer: dismiss if fired, otherwise go to notifications or close
                 if (timer.fired) {
                     timer.active = false;
                     timer.fired = false;
@@ -199,7 +305,6 @@ void checkButtons() {
             } else {
                 notifViewerIdx++;
                 if (notifViewerIdx >= notifCount) {
-                    // Past last notification: dismiss notifications, close
                     notifViewerOpen = false;
                     notifSlideY = -8;
                     notifCount = 0;
@@ -208,7 +313,7 @@ void checkButtons() {
             }
             notifSlideY = -8;
             notifScrollX = 0;
-            notifOpenTime = millis();
+            notifOpenTime = now;
         } else {
             if (config.buttons == "navigate") navigateNext();
         }
@@ -357,6 +462,27 @@ void setupWiFi() {
         httpServer.on("/status", handleStatus);
         httpServer.on("/notify", handleNotify);
         httpServer.on("/timer", handleTimer);
+        httpServer.on("/beep", HTTP_POST, []() {
+            // POST /beep {"pattern":[[freq, duration, pause], ...]}
+            // or shorthand: {"type":"single|double|triple|alarm"}
+            JsonDocument doc;
+            deserializeJson(doc, httpServer.arg("plain"));
+            const char* type = doc["type"] | "";
+            if (strcmp(type, "single") == 0) { beepOnce(); }
+            else if (strcmp(type, "double") == 0) { beepOnce(1500, 60); delay(80); beepOnce(1500, 60); }
+            else if (strcmp(type, "triple") == 0) { beepTriple(); }
+            else if (strcmp(type, "alarm") == 0) { for(int i=0;i<5;i++){beepOnce(2500,40);delay(60);} }
+            else if (doc["pattern"].is<JsonArray>()) {
+                for (JsonArray note : doc["pattern"].as<JsonArray>()) {
+                    uint16_t freq = note[0] | 2000;
+                    uint16_t dur = note[1] | 80;
+                    uint16_t pause = note[2] | 0;
+                    beepOnce(freq, dur);
+                    if (pause > 0) delay(pause);
+                }
+            }
+            httpServer.send(200, "application/json", "{\"ok\":true}");
+        });
         httpServer.begin();
     }
 }
@@ -552,8 +678,13 @@ void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data) {
             if (layer.clock_format == "timer") {
                 // Render device's internal timer countdown
                 if (timer.active) {
-                    int32_t remaining = (int32_t)(timer.endTime - millis());
-                    if (remaining < 0) remaining = 0;
+                    int32_t remaining;
+                    if (timerPaused) {
+                        remaining = timerPausedRemaining;
+                    } else {
+                        remaining = (int32_t)(timer.endTime - millis());
+                        if (remaining < 0) remaining = 0;
+                    }
                     int mins = remaining / 60000;
                     int secs = (remaining / 1000) % 60;
                     snprintf(buf, sizeof(buf), "%02d:%02d", mins, secs);
@@ -565,14 +696,27 @@ void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data) {
                 if (getLocalTime(&t)) {
                     if (layer.clock_format == "12h") {
                         int h = t.tm_hour % 12; if (h == 0) h = 12;
-                        snprintf(buf, sizeof(buf), "%02d:%02d", h, t.tm_min);
+                        // Blink colon: space instead of colon on odd seconds
+                        char sep = (t.tm_sec % 2 == 0) ? ':' : ' ';
+                        snprintf(buf, sizeof(buf), "%02d%c%02d", h, sep, t.tm_min);
                     } else {
-                        snprintf(buf, sizeof(buf), "%02d:%02d", t.tm_hour, t.tm_min);
+                        char sep = (t.tm_sec % 2 == 0) ? ':' : ' ';
+                        snprintf(buf, sizeof(buf), "%02d%c%02d", t.tm_hour, sep, t.tm_min);
                     }
                 }
             }
             ts.resolved = buf;
             display.drawNativeText(ts.resolved, layer.x, layer.y, layer.color, layer.native_spacing, layer.native_large);
+            // PM indicator dot for 12h format
+            if (layer.clock_format == "12h") {
+                struct tm t2;
+                if (getLocalTime(&t2) && t2.tm_hour >= 12) {
+                    // Small dot at bottom-right of clock area
+                    int16_t dotX = layer.x + (layer.native_large ? 26 : 18);
+                    int16_t dotY = layer.y + (layer.native_large ? 6 : 4);
+                    display.drawPixel(dotX, dotY, layer.color);
+                }
+            }
             break;
         }
 
@@ -729,7 +873,7 @@ void loop() {
     httpServer.handleClient();
     uint32_t now = millis();
 
-    if (now - lastButtonCheck > BUTTON_CHECK_MS) { checkButtons(); lastButtonCheck = now; now = millis(); }
+    if (now - lastButtonCheck > BUTTON_CHECK_MS) { checkButtons(); checkLDR(); lastButtonCheck = now; now = millis(); }
     if (now - lastSensorRead > SENSOR_READ_MS) { sensors.read(); lastSensorRead = now; }
 
     // Config
@@ -813,8 +957,13 @@ void loop() {
                     display.drawPixel(bx, max((int16_t)0, notifSlideY), borderColor);
                 }
                 if (notifSlideY >= 0) {
-                    int32_t remaining = (int32_t)(timer.endTime - millis());
-                    if (remaining < 0) remaining = 0;
+                    int32_t remaining;
+                    if (timerPaused) {
+                        remaining = timerPausedRemaining;
+                    } else {
+                        remaining = (int32_t)(timer.endTime - millis());
+                        if (remaining < 0) remaining = 0;
+                    }
                     int mins = remaining / 60000;
                     int secs = (remaining / 1000) % 60;
                     char buf[6];
@@ -855,23 +1004,28 @@ void loop() {
             }
         }
     } else if ((notifCount > 0 || timer.active) && !notifViewerOpen) {
-        // Timer breathing dot — speed increases as time runs out
-        if (timer.active) {
+        // Timer indicator dot
+        if (timer.active && !timerPaused) {
+            // Breathing dot — speed increases as time runs out
             int32_t remaining = (int32_t)(timer.endTime - millis());
             if (remaining < 0) remaining = 0;
-            // Breath cycle: starts very slow (6s), accelerates to 800ms near end
             float progress = 1.0f - (float)remaining / timer.duration;
-            uint16_t cycleMs = 6000 - (uint16_t)(progress * progress * 5200); // quadratic ramp: 6000 → 800
+            uint16_t cycleMs = 6000 - (uint16_t)(progress * progress * 5200);
             if (cycleMs < 800) cycleMs = 800;
             float breath = (sin(millis() * 6.2832f / cycleMs) + 1.0f) * 0.5f;
-            breath = 0.25f + breath * 0.75f; // range 25%-100%, avoids flicker at low end
+            breath = 0.25f + breath * 0.75f;
             uint8_t r = ((timer.color >> 16) & 0xFF) * breath;
             uint8_t g = ((timer.color >> 8) & 0xFF) * breath;
             uint8_t b = (timer.color & 0xFF) * breath;
-            uint32_t dimColor = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
-            display.drawPixel(MATRIX_WIDTH - 1, 0, dimColor);
+            display.drawPixel(MATRIX_WIDTH - 1, 0, ((uint32_t)r << 16) | ((uint32_t)g << 8) | b);
+        } else if (timer.active && timerPaused) {
+            // Paused: static dim dot (no breathing)
+            uint8_t r = ((timer.color >> 16) & 0xFF) >> 2;
+            uint8_t g = ((timer.color >> 8) & 0xFF) >> 2;
+            uint8_t b = (timer.color & 0xFF) >> 2;
+            display.drawPixel(MATRIX_WIDTH - 1, 0, ((uint32_t)r << 16) | ((uint32_t)g << 8) | b);
         }
-        // Notification dots (offset if timer is showing)
+        // Notification dots (offset if timer dot is showing)
         int dotOffset = timer.active ? 2 : 0;
         for (int i = 0; i < notifCount && i < 3; i++) {
             display.drawPixel(MATRIX_WIDTH - 1 - dotOffset - (i * 2), 0, notifications[i].color);
@@ -882,7 +1036,7 @@ void loop() {
     display.show();
 
     // Timer completion check
-    if (timer.active && !timer.fired && millis() >= timer.endTime) {
+    if (timer.active && !timer.fired && !timerPaused && millis() >= timer.endTime) {
         timer.fired = true;
         beepTriple();
         // Keep timer active so user sees 00:00 and can dismiss

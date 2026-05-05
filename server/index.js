@@ -145,25 +145,23 @@ app.post('/event', (req, res) => {
   const { event, screen } = req.body;
   console.log(`[event] button=${event} screen=${screen}`);
 
-  if (event === 'select') {
-    // Middle button: context action
+  if (event === 'select' || event === 'select_long') {
     const action = registry.getContextAction(screen);
-    console.log(`[action] screen=${screen} action=${action}`);
+    console.log(`[action] screen=${screen} event=${event} action=${action}`);
 
-    if (action === 'pause') {
-      paused = !paused;
-      console.log(`[action] rotation ${paused ? 'paused' : 'resumed'}`);
-    } else if (action === 'pomodoro') {
-      // Forward to pomodoro toggle
+    if (action === 'pomodoro') {
       const fetch = require('http');
       const postData = JSON.stringify({});
-      const req = fetch.request(`http://localhost:${PORT}/pomodoro/toggle`, {
+      const r = fetch.request(`http://localhost:${PORT}/pomodoro/toggle`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Content-Length': postData.length },
       });
-      req.write(postData);
-      req.end();
+      r.write(postData);
+      r.end();
       console.log('[action] pomodoro toggle');
+    } else if (action === 'pause') {
+      paused = !paused;
+      console.log(`[action] rotation ${paused ? 'paused' : 'resumed'}`);
     }
     res.json({ ok: true, action, paused });
   } else {
