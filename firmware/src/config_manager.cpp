@@ -68,6 +68,7 @@ static Layer parseLayer(JsonObject l, uint32_t defaultScrollSpeed) {
     layer.x = l["x"] | (int16_t)0;
     layer.y = l["y"] | (int16_t)0;
     layer.opacity = l["opacity"] | 255;
+    layer.blend = l["blend"] | "normal";
 
     const char* typeStr = l["type"] | "";
     if (strcmp(typeStr, "icon") == 0) {
@@ -119,6 +120,11 @@ static Layer parseLayer(JsonObject l, uint32_t defaultScrollSpeed) {
         layer.pixels_data_key = l["data_key"] | "";
         layer.pixels_color = strtoul((l["color"] | "4488FF"), NULL, 16);
         layer.pixels_dim_color = strtoul((l["dim_color"] | "112233"), NULL, 16);
+        if (l["points"].is<JsonArray>()) {
+            for (JsonArray pt : l["points"].as<JsonArray>()) {
+                layer.pixels_points.push_back({pt[0].as<int8_t>(), pt[1].as<int8_t>()});
+            }
+        }
     } else if (strcmp(typeStr, "gradient") == 0) {
         layer.type = LAYER_GRADIENT;
         layer.grad_w = l["width"] | 0;

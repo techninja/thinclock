@@ -24,6 +24,7 @@ public:
     // Opacity support: snapshot before layer, blend after
     void snapshotLayer();  // save current buffer state
     void applyLayerOpacity(uint8_t opacity);  // blend new pixels with saved state
+    void applyLayerAdditive();  // additive: add new pixels to saved state (black=transparent)
 
     // Native pixel-perfect renderers (no font library)
     void drawDigit(int16_t x, int16_t y, uint8_t digit, uint32_t color, bool large = false);

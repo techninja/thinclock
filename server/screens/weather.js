@@ -157,21 +157,29 @@ function getWeatherLayers(condition, temp, config, wind_speed, wind_deg) {
   // Build layers: icon and text first, then particles on top with opacity
   layers.push({ type: 'icon', name: icon, x: 0, y: 0 });
 
-  // Two values side by side: temp left, humidity right (small font, vertically centered)
-  const unit = config.temp_unit || 'F';
+  // Temperature: large font, centered, with degree symbol
   const tempColor = temp > 80 ? 'FF4400' : temp > 60 ? 'FFAA00' : temp > 40 ? '44AAFF' : '4444FF';
   layers.push({
-    type: 'native', label: `{temp}${unit}`, x: 10, y: 1,
-    color: tempColor, large: false, spacing: 1,
+    type: 'native', label: '{temp}F', x: 12, y: 0,
+    color: tempColor, large: true, spacing: 1,
   });
-  layers.push({
-    type: 'native', label: '{humidity}%', x: 21, y: 1,
-    color: '44AACC', large: false, spacing: 1,
-  });
+
   // Particles on top with transparency
   if (particles) {
     particles.opacity = 100;
     layers.push(particles);
+  }
+
+  // Heat shimmer when hot (>95F)
+  if (temp > 95) {
+    const heatRate = Math.min(20, 8 + (temp - 95) * 1.2);
+    layers.push({
+      type: 'particles', gravity: -3, edge: 'die', opacity: 80,
+      colors: { min: 0, max: 1, stops: [[0,'FF4400'],[0.5,'FF8800'],[1,'FFAA00']] },
+      emitters: [
+        { x: -1, y: 7, vx_min: -0.5, vx_max: 0.5, vy_min: -2, vy_max: -0.5, rate: heatRate, life_min: 500, life_max: 1200, size: 1 },
+      ],
+    });
   }
 
   return layers;
@@ -181,7 +189,7 @@ function getWeatherLayers(condition, temp, config, wind_speed, wind_deg) {
 let weatherCache = { condition: 500, temp: 58, humidity: 77, wind_speed: 5, wind_deg: 270, updated: 0 };
 
 exports.screen = (config) => ({
-  duration: 10000,
+  duration: 30000,
   data_url: `${config.BASE}/data/weather`,
   layers: getWeatherLayers(weatherCache.condition, weatherCache.temp, config, weatherCache.wind_speed, weatherCache.wind_deg),
 });

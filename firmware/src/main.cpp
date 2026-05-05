@@ -459,8 +459,9 @@ void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data) {
             applyTweens(layer, now - state.startTime);
         }
 
-        // Snapshot before layer for opacity blending
-        if (layer.opacity < 255) display.snapshotLayer();
+        // Snapshot before layer for opacity/blend
+        bool needsBlend = (layer.opacity < 255 || layer.blend == "add");
+        if (needsBlend) display.snapshotLayer();
 
         switch (layer.type) {
 
@@ -602,6 +603,14 @@ void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data) {
                     display.drawPixel(dx, layer.y, c);
                     display.drawPixel(dx + 1, layer.y, c);
                 }
+            } else if (layer.pixels_pattern == "vline") {
+                for (int16_t row = layer.y; row < MATRIX_HEIGHT; row++) {
+                    display.drawPixel(layer.x, row, layer.pixels_color);
+                }
+            } else if (layer.pixels_pattern == "dots" && !layer.pixels_points.empty()) {
+                for (auto& pt : layer.pixels_points) {
+                    display.drawPixel(layer.x + pt.first, layer.y + pt.second, layer.pixels_color);
+                }
             }
             break;
         }
@@ -629,8 +638,12 @@ void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data) {
 
         } // switch
 
-        // Apply opacity blending after layer rendered
-        if (layer.opacity < 255) display.applyLayerOpacity(layer.opacity);
+        // Apply blend mode after layer rendered
+        if (layer.blend == "add") {
+            display.applyLayerAdditive();
+        } else if (layer.opacity < 255) {
+            display.applyLayerOpacity(layer.opacity);
+        }
     } // for layers
 }
 

@@ -97,6 +97,7 @@ struct Layer {
     LayerType type;
     int16_t x, y;
     uint8_t opacity;  // 0-255, applied to all pixels this layer draws
+    String blend;      // "normal" (default), "add" (additive - black=transparent)
 
     // LAYER_ICON
     String icon_name;
@@ -130,6 +131,7 @@ struct Layer {
     String pixels_data_key;
     uint32_t pixels_color;
     uint32_t pixels_dim_color;
+    std::vector<std::pair<int8_t, int8_t>> pixels_points; // for "dots" pattern
 
     // LAYER_GRADIENT
     uint8_t grad_w, grad_h;       // size (0 = full screen)

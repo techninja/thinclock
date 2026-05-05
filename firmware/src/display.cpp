@@ -143,10 +143,20 @@ void Display::snapshotLayer() {
 }
 
 void Display::applyLayerOpacity(uint8_t opacity) {
-    if (opacity >= 255) return;  // fully opaque, nothing to blend
+    if (opacity >= 255) return;
     for (uint16_t i = 0; i < NUM_LEDS; i++) {
-        // Blend: where this layer drew new pixels, mix with the snapshot
         active_buf[i] = blend(layer_snap[i], active_buf[i], opacity);
+    }
+}
+
+void Display::applyLayerAdditive() {
+    // Additive blend: new pixels ADD to the background. Black = no change.
+    for (uint16_t i = 0; i < NUM_LEDS; i++) {
+        active_buf[i] = CRGB(
+            min(255, (int)layer_snap[i].r + (int)active_buf[i].r),
+            min(255, (int)layer_snap[i].g + (int)active_buf[i].g),
+            min(255, (int)layer_snap[i].b + (int)active_buf[i].b)
+        );
     }
 }
 
@@ -306,10 +316,12 @@ int16_t Display::drawNativeText(const String& text, int16_t x, int16_t y, uint32
             drawPixel(cx + 1, y + (large ? 3 : 2), color);
             cx += 3 + spacing;
         } else if (ch == 'F' || ch == 'C') {
-            drawPixel(cx, y, color);
-            drawPixel(cx + 1, y, color);
-            drawPixel(cx, y + 1, color);
-            cx += 3 + spacing;
+            // Degree circle: 4px cross pattern
+            drawPixel(cx + 1, y, color);     // top
+            drawPixel(cx, y + 1, color);     // left
+            drawPixel(cx + 2, y + 1, color); // right
+            drawPixel(cx + 1, y + 2, color); // bottom
+            cx += 4 + spacing;
         } else {
             cx += 2;
         }

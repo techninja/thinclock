@@ -23,7 +23,7 @@ exports.icons = {
 };
 
 exports.screen = (config) => ({
-  duration: 15000,
+  duration: 30000,
   data_url: `${config.BASE}/data/datetime`,
   layers: [
     { type: 'gradient', x: 1, y: 2, width: 7, height: 6, direction: 'vertical',
