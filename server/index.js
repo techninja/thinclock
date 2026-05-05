@@ -153,8 +153,18 @@ app.post('/event', (req, res) => {
     if (action === 'pause') {
       paused = !paused;
       console.log(`[action] rotation ${paused ? 'paused' : 'resumed'}`);
+    } else if (action === 'pomodoro') {
+      // Forward to pomodoro toggle
+      const fetch = require('http');
+      const postData = JSON.stringify({});
+      const req = fetch.request(`http://localhost:${PORT}/pomodoro/toggle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': postData.length },
+      });
+      req.write(postData);
+      req.end();
+      console.log('[action] pomodoro toggle');
     }
-    // Custom actions can be handled here per-screen
     res.json({ ok: true, action, paused });
   } else {
     res.json({ ok: true });

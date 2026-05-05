@@ -93,6 +93,8 @@ int16_t Display::nativeTextWidth(const String& text, uint8_t spacing, bool large
             w += charW + spacing;
         } else if (ch == ':' || ch == '.' || ch == '!') {
             w += 1 + spacing;
+        } else if (ch == '-') {
+            w += 3 + spacing;
         } else if (ch == ' ') {
             w += 2;
         } else if (ch == '%') {
@@ -310,6 +312,11 @@ int16_t Display::drawNativeText(const String& text, int16_t x, int16_t y, uint32
             drawPixel(cx, y + 2, color);
             drawPixel(cx, y + 4, color);
             cx += 1 + spacing;
+        } else if (ch == '-') {
+            drawPixel(cx, y + 2, color);
+            drawPixel(cx + 1, y + 2, color);
+            drawPixel(cx + 2, y + 2, color);
+            cx += 3 + spacing;
         } else if (ch == '%') {
             drawPixel(cx, y, color);
             drawPixel(cx + 2, y + (large ? 6 : 4), color);

@@ -232,6 +232,25 @@ bool ConfigManager::fetchData(const String& url, JsonDocument& doc) {
             doc["light_raw"] = (int)sensors.data.light;
             return true;
         }
+        if (path == "ping" || path == "/ping") {
+            // HTTP ping to 1.1.1.1 — measures device's own internet latency
+            HTTPClient ping;
+            ping.begin("http://1.1.1.1/");
+            ping.setTimeout(3000);
+            uint32_t start = millis();
+            int code = ping.GET();
+            uint32_t elapsed = millis() - start;
+            ping.end();
+            if (code > 0) {
+                doc["ping"] = (int)elapsed;
+                doc["status"] = 1;
+            } else {
+                doc["ping"] = 0;
+                doc["status"] = 0;
+            }
+            doc["rssi"] = WiFi.RSSI();
+            return true;
+        }
         return false;
     }
 

@@ -548,14 +548,27 @@ void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data) {
 
         case LAYER_CLOCK: {
             TextState& ts = state.textStates[textIdx++];
-            struct tm t;
             char buf[6] = "??:??";
-            if (getLocalTime(&t)) {
-                if (layer.clock_format == "12h") {
-                    int h = t.tm_hour % 12; if (h == 0) h = 12;
-                    snprintf(buf, sizeof(buf), "%02d:%02d", h, t.tm_min);
+            if (layer.clock_format == "timer") {
+                // Render device's internal timer countdown
+                if (timer.active) {
+                    int32_t remaining = (int32_t)(timer.endTime - millis());
+                    if (remaining < 0) remaining = 0;
+                    int mins = remaining / 60000;
+                    int secs = (remaining / 1000) % 60;
+                    snprintf(buf, sizeof(buf), "%02d:%02d", mins, secs);
                 } else {
-                    snprintf(buf, sizeof(buf), "%02d:%02d", t.tm_hour, t.tm_min);
+                    snprintf(buf, sizeof(buf), "--:--");
+                }
+            } else {
+                struct tm t;
+                if (getLocalTime(&t)) {
+                    if (layer.clock_format == "12h") {
+                        int h = t.tm_hour % 12; if (h == 0) h = 12;
+                        snprintf(buf, sizeof(buf), "%02d:%02d", h, t.tm_min);
+                    } else {
+                        snprintf(buf, sizeof(buf), "%02d:%02d", t.tm_hour, t.tm_min);
+                    }
                 }
             }
             ts.resolved = buf;
@@ -790,7 +803,7 @@ void loop() {
             notifViewerOpen = false;
             notifSlideY = -8;
         } else {
-            display.fadeAll(50);
+            display.fadeAll(25);  // dim background to ~10% for notification readability
             if (notifSlideY < 0) notifSlideY += 1;
 
             if (notifViewerIdx == -1 && timer.active) {
@@ -846,13 +859,12 @@ void loop() {
         if (timer.active) {
             int32_t remaining = (int32_t)(timer.endTime - millis());
             if (remaining < 0) remaining = 0;
-            // Breath cycle: slower when lots of time, faster near end
-            // Full time = 3000ms cycle, last 10% = 300ms cycle
+            // Breath cycle: starts very slow (6s), accelerates to 800ms near end
             float progress = 1.0f - (float)remaining / timer.duration;
-            uint16_t cycleMs = 3000 - (uint16_t)(progress * 2500); // 3000 → 500
-            if (cycleMs < 500) cycleMs = 500;
+            uint16_t cycleMs = 6000 - (uint16_t)(progress * progress * 5200); // quadratic ramp: 6000 → 800
+            if (cycleMs < 800) cycleMs = 800;
             float breath = (sin(millis() * 6.2832f / cycleMs) + 1.0f) * 0.5f;
-            breath = 0.15f + breath * 0.85f; // never fully off, range 15%-100%
+            breath = 0.25f + breath * 0.75f; // range 25%-100%, avoids flicker at low end
             uint8_t r = ((timer.color >> 16) & 0xFF) * breath;
             uint8_t g = ((timer.color >> 8) & 0xFF) * breath;
             uint8_t b = (timer.color & 0xFF) * breath;
