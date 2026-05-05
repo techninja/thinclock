@@ -169,6 +169,16 @@ struct Notification {
     bool active;
 };
 
+// --- Timer ---
+
+struct Timer {
+    uint32_t endTime;    // millis() when timer expires
+    uint32_t duration;   // original duration in ms
+    uint32_t color;
+    bool active;
+    bool fired;          // has the completion beep fired
+};
+
 // --- Config ---
 
 struct Config {

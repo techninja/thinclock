@@ -73,6 +73,10 @@ uint32_t notifOpenTime = 0;
 #define NOTIF_TIMEOUT_MS 60000
 #define NOTIF_SCROLL_SPEED 45
 
+// Timer
+Timer timer = {0, 0, 0x00AAFF, false, false};
+uint32_t timerBreathPhase = 0;
+
 // Buttons
 bool btnLeftLast = HIGH, btnMidLast = HIGH, btnRightLast = HIGH;
 uint32_t lastNavTime = 0;
@@ -142,13 +146,21 @@ void checkButtons() {
 
     if (l == LOW && btnLeftLast == HIGH) {
         if (notifViewerOpen) {
-            // Previous notification
+            // Previous: go back toward timer
             if (notifViewerIdx > 0) {
                 notifViewerIdx--;
+            } else if (notifViewerIdx == 0 && timer.active) {
+                notifViewerIdx = -1;
+            } else if (notifViewerIdx == -1 && timer.fired) {
+                // Dismiss fired timer
+                timer.active = false;
+                timer.fired = false;
+                notifViewerOpen = false;
                 notifSlideY = -8;
-                notifScrollX = 0;
-                notifOpenTime = millis();
             }
+            notifSlideY = -8;
+            notifScrollX = 0;
+            notifOpenTime = millis();
         } else {
             if (config.buttons == "navigate") navigatePrev();
         }
@@ -156,13 +168,13 @@ void checkButtons() {
     }
     if (m == LOW && btnMidLast == HIGH) {
         if (notifViewerOpen) {
-            // Close viewer
+            // Close viewer (doesn't dismiss)
             notifViewerOpen = false;
             notifSlideY = -8;
-        } else if (notifCount > 0) {
-            // Open viewer
+        } else if (timer.active || notifCount > 0) {
+            // Open viewer: start at timer if active, else first notification
             notifViewerOpen = true;
-            notifViewerIdx = 0;
+            notifViewerIdx = timer.active ? -1 : 0;
             notifSlideY = -8;
             notifScrollX = 0;
             notifOpenTime = millis();
@@ -171,19 +183,32 @@ void checkButtons() {
     }
     if (r == LOW && btnRightLast == HIGH) {
         if (notifViewerOpen) {
-            // Next notification or close
-            notifViewerIdx++;
-            if (notifViewerIdx >= notifCount) {
-                // Dismiss all and close
-                notifViewerOpen = false;
-                notifSlideY = -8;
-                notifCount = 0;
-                for (auto& n : notifications) n.active = false;
+            // Next item
+            if (notifViewerIdx == -1) {
+                // From timer: dismiss if fired, otherwise go to notifications or close
+                if (timer.fired) {
+                    timer.active = false;
+                    timer.fired = false;
+                }
+                if (notifCount > 0) {
+                    notifViewerIdx = 0;
+                } else {
+                    notifViewerOpen = false;
+                    notifSlideY = -8;
+                }
             } else {
-                notifSlideY = -8;
-                notifScrollX = 0;
-                notifOpenTime = millis();
+                notifViewerIdx++;
+                if (notifViewerIdx >= notifCount) {
+                    // Past last notification: dismiss notifications, close
+                    notifViewerOpen = false;
+                    notifSlideY = -8;
+                    notifCount = 0;
+                    for (auto& n : notifications) n.active = false;
+                }
             }
+            notifSlideY = -8;
+            notifScrollX = 0;
+            notifOpenTime = millis();
         } else {
             if (config.buttons == "navigate") navigateNext();
         }
@@ -274,6 +299,40 @@ void handleNotify() {
     }
 }
 
+void handleTimer() {
+    if (httpServer.method() == HTTP_POST) {
+        // Start timer: POST /timer {"duration":1500000,"color":"00AAFF"}
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, httpServer.arg("plain"));
+        if (err) { httpServer.send(400, "application/json", "{\"error\":\"parse\"}"); return; }
+
+        timer.duration = doc["duration"] | 60000;
+        timer.endTime = millis() + timer.duration;
+        timer.color = strtoul((doc["color"] | "00AAFF"), NULL, 16);
+        timer.active = true;
+        timer.fired = false;
+        beepOnce(1500, 50);
+        Serial.printf("[timer] started %lums\n", timer.duration);
+        httpServer.send(200, "application/json", "{\"ok\":true}");
+    } else if (httpServer.method() == HTTP_DELETE) {
+        // Cancel timer
+        timer.active = false;
+        timer.fired = false;
+        httpServer.send(200, "application/json", "{\"ok\":true}");
+    } else {
+        // GET: return status
+        JsonDocument doc;
+        doc["active"] = timer.active;
+        if (timer.active) {
+            int32_t remaining = (int32_t)(timer.endTime - millis());
+            doc["remaining"] = remaining > 0 ? remaining : 0;
+            doc["duration"] = timer.duration;
+        }
+        String out; serializeJson(doc, out);
+        httpServer.send(200, "application/json", out);
+    }
+}
+
 // --- WiFi & Serial ---
 void setupWiFi() {
     prefs.begin("thinclock", true);
@@ -297,6 +356,7 @@ void setupWiFi() {
         httpServer.on("/sensors", handleSensors);
         httpServer.on("/status", handleStatus);
         httpServer.on("/notify", handleNotify);
+        httpServer.on("/timer", handleTimer);
         httpServer.begin();
     }
 }
@@ -712,49 +772,107 @@ void loop() {
     }
 
     // --- Notification overlay (into render buffer before final show) ---
-    if (notifViewerOpen && notifViewerIdx < notifCount) {
+    if (notifViewerOpen) {
         if (now - notifOpenTime > NOTIF_TIMEOUT_MS) {
             notifViewerOpen = false;
             notifSlideY = -8;
         } else {
             display.fadeAll(50);
             if (notifSlideY < 0) notifSlideY += 1;
-            uint32_t borderColor = notifications[notifViewerIdx].color;
-            for (int16_t bx = 0; bx < MATRIX_WIDTH; bx++) {
-                display.drawPixel(bx, max((int16_t)0, notifSlideY), borderColor);
-            }
-            if (notifSlideY >= 0) {
-                Notification& n = notifications[notifViewerIdx];
-                for (auto& l : n.layers) {
-                    if (l.type == LAYER_TEXT) {
-                        int16_t textW = display.nativeTextWidth(l.label);
-                        int16_t textY = notifSlideY + 2;
-                        if (textW <= MATRIX_WIDTH) {
-                            display.drawNativeText(l.label, (MATRIX_WIDTH - textW) / 2, textY, l.color, 1, false);
-                        } else {
-                            int16_t drawX = MATRIX_WIDTH - notifScrollX;
-                            display.drawNativeText(l.label, drawX, textY, l.color, 1, false);
-                            if (now - notifLastScroll >= NOTIF_SCROLL_SPEED) {
-                                notifScrollX++;
-                                notifLastScroll = now;
-                                if (drawX + textW < 0) notifScrollX = 0;
+
+            if (notifViewerIdx == -1 && timer.active) {
+                // Show timer countdown
+                uint32_t borderColor = timer.color;
+                for (int16_t bx = 0; bx < MATRIX_WIDTH; bx++) {
+                    display.drawPixel(bx, max((int16_t)0, notifSlideY), borderColor);
+                }
+                if (notifSlideY >= 0) {
+                    int32_t remaining = (int32_t)(timer.endTime - millis());
+                    if (remaining < 0) remaining = 0;
+                    int mins = remaining / 60000;
+                    int secs = (remaining / 1000) % 60;
+                    char buf[6];
+                    snprintf(buf, sizeof(buf), "%02d:%02d", mins, secs);
+                    int16_t textY = notifSlideY + 2;
+                    display.drawNativeText(buf, 8, textY, timer.color, 1, false);
+                }
+            } else if (notifViewerIdx >= 0 && notifViewerIdx < notifCount) {
+                // Show notification
+                uint32_t borderColor = notifications[notifViewerIdx].color;
+                for (int16_t bx = 0; bx < MATRIX_WIDTH; bx++) {
+                    display.drawPixel(bx, max((int16_t)0, notifSlideY), borderColor);
+                }
+                if (notifSlideY >= 0) {
+                    Notification& n = notifications[notifViewerIdx];
+                    for (auto& l : n.layers) {
+                        if (l.type == LAYER_TEXT) {
+                            int16_t textW = display.nativeTextWidth(l.label);
+                            int16_t textY = notifSlideY + 2;
+                            if (textW <= MATRIX_WIDTH) {
+                                display.drawNativeText(l.label, (MATRIX_WIDTH - textW) / 2, textY, l.color, 1, false);
+                            } else {
+                                int16_t drawX = MATRIX_WIDTH - notifScrollX;
+                                display.drawNativeText(l.label, drawX, textY, l.color, 1, false);
+                                if (now - notifLastScroll >= NOTIF_SCROLL_SPEED) {
+                                    notifScrollX++;
+                                    notifLastScroll = now;
+                                    if (drawX + textW < 0) notifScrollX = 0;
+                                }
                             }
                         }
                     }
                 }
+            } else {
+                // No more items, close
+                notifViewerOpen = false;
+                notifSlideY = -8;
             }
         }
-    } else if (notifCount > 0 && !notifViewerOpen) {
+    } else if ((notifCount > 0 || timer.active) && !notifViewerOpen) {
+        // Timer breathing dot — speed increases as time runs out
+        if (timer.active) {
+            int32_t remaining = (int32_t)(timer.endTime - millis());
+            if (remaining < 0) remaining = 0;
+            // Breath cycle: slower when lots of time, faster near end
+            // Full time = 3000ms cycle, last 10% = 300ms cycle
+            float progress = 1.0f - (float)remaining / timer.duration;
+            uint16_t cycleMs = 3000 - (uint16_t)(progress * 2500); // 3000 → 500
+            if (cycleMs < 500) cycleMs = 500;
+            float breath = (sin(millis() * 6.2832f / cycleMs) + 1.0f) * 0.5f;
+            breath = 0.15f + breath * 0.85f; // never fully off, range 15%-100%
+            uint8_t r = ((timer.color >> 16) & 0xFF) * breath;
+            uint8_t g = ((timer.color >> 8) & 0xFF) * breath;
+            uint8_t b = (timer.color & 0xFF) * breath;
+            uint32_t dimColor = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+            display.drawPixel(MATRIX_WIDTH - 1, 0, dimColor);
+        }
+        // Notification dots (offset if timer is showing)
+        int dotOffset = timer.active ? 2 : 0;
         for (int i = 0; i < notifCount && i < 3; i++) {
-            display.drawPixel(MATRIX_WIDTH - 1 - (i * 2), 0, notifications[i].color);
+            display.drawPixel(MATRIX_WIDTH - 1 - dotOffset - (i * 2), 0, notifications[i].color);
         }
     }
 
     // Single show per frame
     display.show();
 
+    // Timer completion check
+    if (timer.active && !timer.fired && millis() >= timer.endTime) {
+        timer.fired = true;
+        beepTriple();
+        // Keep timer active so user sees 00:00 and can dismiss
+    }
+
     // Alert beep check (repeating notifications)
     if (!notifViewerOpen) {
+        // Timer done — repeat beep every 15s until viewed
+        if (timer.active && timer.fired) {
+            static uint32_t lastTimerBeep = 0;
+            if (now - lastTimerBeep >= 15000) {
+                beepTriple();
+                lastTimerBeep = now;
+            }
+        }
         for (int i = 0; i < notifCount; i++) {
             if (notifications[i].beep == 2 && notifications[i].active) {
                 if (now - notifications[i].lastBeep >= notifications[i].alertInterval) {
