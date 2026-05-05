@@ -5,6 +5,31 @@ exports.enabled = true;
 exports.priority = 6;
 exports.tags = ['utility', 'network'];
 
+exports.alerts = [
+  {
+    id: 'internet_slow',
+    condition: (history) => {
+      if (history.length < 5) return false;
+      return history.slice(-5).every(d => d.ping > 600 && d.ping > 0);
+    },
+    message: 'Slow internet',
+    color: 'FFAA00',
+    beep: 'single',
+    cooldown: 300000, // 5 min
+  },
+  {
+    id: 'internet_down',
+    condition: (history) => {
+      if (history.length < 3) return false;
+      return history.slice(-3).every(d => d.ping === 0 || d.status === 0);
+    },
+    message: 'Internet down!',
+    color: 'FF0000',
+    beep: 'alert',
+    cooldown: 60000, // 1 min
+  },
+];
+
 exports.icons = {
   wifi_net: {
     width: 8, height: 8, fps: 0,

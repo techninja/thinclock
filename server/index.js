@@ -43,8 +43,41 @@ console.log('\nAdapters:');
 const ha = new HomeAssistantAdapter(config);
 ha.setup(app, config);
 
+// --- Alert engine ---
+const AlertEngine = require('./lib/alerts');
+const alerts = new AlertEngine({ deviceIP: process.env.DEVICE_IP });
+config.alerts = alerts;
+
+// Poll device data and do server-side ping for alerts
+async function pollDeviceForAlerts() {
+  const deviceIP = process.env.DEVICE_IP;
+
+  // Server-side HTTP ping (same as device does)
+  try {
+    const start = Date.now();
+    const resp = await fetch('http://1.1.1.1/', { signal: AbortSignal.timeout(3000) });
+    const ping = Date.now() - start;
+    alerts.pushData('network', { ping, status: 1, rssi: 0 });
+  } catch (e) {
+    alerts.pushData('network', { ping: 0, status: 0, rssi: 0 });
+  }
+
+  // Also grab device sensors if available
+  if (deviceIP) {
+    try {
+      const resp = await fetch(`http://${deviceIP}/sensors`, { signal: AbortSignal.timeout(2000) });
+      const data = await resp.json();
+      alerts.pushData('sensors', data);
+    } catch (e) {}
+  }
+}
+
+// Also allow screens to push data from their own routes
+config.pushAlert = (screenId, data) => alerts.pushData(screenId, data);
+
 // --- Register screen routes (once at startup) ---
 registry.registerRoutes(app, config);
+alerts.registerFromModules(registry.modules);
 
 // Log active screens
 const active = registry.getActiveModules();
@@ -169,6 +202,25 @@ app.post('/event', (req, res) => {
   }
 });
 
+// --- Test/simulate alerts ---
+app.post('/test/alert', (req, res) => {
+  const { screen, data } = req.body;
+  if (screen && data) {
+    alerts.pushData(screen, data);
+    res.json({ ok: true, history: alerts.history[screen]?.length || 0 });
+  } else {
+    res.json({ error: 'need {screen, data}' });
+  }
+});
+
+app.get('/test/alerts', (req, res) => {
+  res.json({
+    registered: alerts.alerts.map(a => ({ id: a.id, module: a._module, cooldown: a.cooldown })),
+    history: Object.fromEntries(Object.entries(alerts.history).map(([k,v]) => [k, v.length])),
+    lastFired: alerts.lastFired,
+  });
+});
+
 // --- Start ---
 app.listen(PORT, () => {
   console.log(`\nthinclock server (mode: ${registry.mode})`);
@@ -180,4 +232,8 @@ app.listen(PORT, () => {
   console.log(`\nSend to device serial:`);
   console.log(`{"ssid":"${process.env.WIFI_SSID}","pass":"${process.env.WIFI_PASS}","config_url":"${BASE}/config"}`);
   console.log();
+
+  // Start polling for alerts (every 15s)
+  setInterval(pollDeviceForAlerts, 15000);
+  pollDeviceForAlerts();
 });

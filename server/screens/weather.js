@@ -6,6 +6,36 @@ exports.priority = 9;
 exports.tags = ['utility', 'weather'];
 exports.contextAction = 'refresh';
 
+exports.alerts = [
+  {
+    id: 'rain_started',
+    condition: (history) => {
+      if (history.length < 2) return false;
+      const prev = history[history.length - 2];
+      const curr = history[history.length - 1];
+      // Previous was NOT rain/drizzle/storm, current IS
+      const wasRaining = prev.condition >= 200 && prev.condition < 600;
+      const isRaining = curr.condition >= 200 && curr.condition < 600;
+      return !wasRaining && isRaining;
+    },
+    message: 'Rain starting',
+    color: '4488FF',
+    beep: 'single',
+    cooldown: 1800000,
+  },
+  {
+    id: 'severe_weather',
+    condition: (history) => {
+      const curr = history[history.length - 1];
+      return curr && curr.condition >= 200 && curr.condition < 300;
+    },
+    message: 'Severe weather!',
+    color: 'FF0000',
+    beep: 'alert',
+    cooldown: 3600000, // 1 hour
+  },
+];
+
 exports.icons = {
   weather_sun: {
     width: 8, height: 8, fps: 0,
@@ -217,6 +247,8 @@ exports.routes = (app, config) => {
           updated: Date.now(),
         };
         console.log(`[weather] ${CITY}: ${weatherCache.temp}°${config.temp_unit} (${weatherCache.description})`);
+        // Push to alert engine
+        if (config.pushAlert) config.pushAlert('weather', weatherCache);
       }
     } catch (e) {
       console.error('[weather] fetch error:', e.message);

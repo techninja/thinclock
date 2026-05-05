@@ -3,6 +3,33 @@ exports.enabled = true;
 exports.priority = 7;
 exports.tags = ['utility', 'weather'];
 
+exports.alerts = [
+  {
+    id: 'aqi_unhealthy',
+    condition: (history) => {
+      if (history.length < 2) return false;
+      const prev = history[history.length - 2];
+      const curr = history[history.length - 1];
+      return prev.aqi <= 100 && curr.aqi > 100;
+    },
+    message: 'AQI unhealthy',
+    color: 'FF8800',
+    beep: 'single',
+    cooldown: 3600000, // 1 hour
+  },
+  {
+    id: 'aqi_dangerous',
+    condition: (history) => {
+      const curr = history[history.length - 1];
+      return curr && curr.aqi > 200;
+    },
+    message: 'AQI dangerous!',
+    color: 'FF0000',
+    beep: 'alert',
+    cooldown: 3600000,
+  },
+];
+
 let aqiCache = { aqi: 42, category: 'Good', updated: 0 };
 
 exports.screen = (config) => {
@@ -53,6 +80,7 @@ exports.routes = (app, config) => {
         const epaAqi = pm25ToAqi(pm25);
         aqiCache = { aqi: epaAqi, category: aqiCategory(epaAqi), updated: Date.now() };
         console.log(`[aqi] ${CITY}: AQI ${epaAqi} (${aqiCache.category})`);
+        if (config.pushAlert) config.pushAlert('aqi', aqiCache);
       }
     } catch (e) {
       console.error('[aqi] fetch error:', e.message);
