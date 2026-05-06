@@ -190,7 +190,17 @@ function getWeatherLayers(condition, temp, config, wind_speed, wind_deg) {
   layers.push({ type: 'icon', name: icon, x: 0, y: 0 });
 
   // Temperature: large font, centered, with degree symbol
-  const tempColor = temp > 80 ? 'FF4400' : temp > 60 ? 'FFAA00' : temp > 40 ? '44AAFF' : '4444FF';
+  // Temperature color: blue(cold) → green(nice 67-72) → yellow → red(hot)
+  const comfyLow = parseInt(process.env.TEMP_COMFY_LOW) || 67;
+  const comfyHigh = parseInt(process.env.TEMP_COMFY_HIGH) || 72;
+  let tempColor;
+  if (temp >= comfyLow && temp <= comfyHigh) tempColor = '00CC44';      // green = nice
+  else if (temp > comfyHigh && temp <= 80) tempColor = 'AACC00';        // yellow-green
+  else if (temp > 80 && temp <= 90) tempColor = 'FFAA00';               // orange
+  else if (temp > 90) tempColor = 'FF4400';                              // red = hot
+  else if (temp < comfyLow && temp >= 55) tempColor = '44CCAA';         // teal
+  else if (temp < 55 && temp >= 40) tempColor = '44AAFF';               // blue
+  else tempColor = '4444FF';                                             // deep blue = cold
   layers.push({
     type: 'native', label: '{temp}F', x: 12, y: 0,
     color: tempColor, large: true, spacing: 1,

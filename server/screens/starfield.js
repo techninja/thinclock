@@ -11,7 +11,7 @@ exports.tags = ['fun', 'ambient'];
 exports.screen = () => ({
   duration: 12000,
   layers: [
-    { type: 'particles', gravity: 0, edge: 'die',
+    { type: 'particles', gravity: 0, edge: 'die', warmup: 5000,
       colors: { min: 0, max: 1, stops: [[0,'000000'],[0.1,'000000'],[0.4,'333355'],[0.7,'8899CC'],[0.9,'FFFFFF'],[1,'FFFFFF']] },
       emitters: [
         // Mix of speeds — all live long enough to reach edges

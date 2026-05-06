@@ -5,6 +5,9 @@ exports.enabled = true;
 exports.priority = 5;
 exports.tags = ['utility', 'timer'];
 exports.contextAction = 'pomodoro';
+exports.schedule = {
+  hours: (process.env.WORKING_HOURS || '8,9,10,11,12,13,14,15,16,17').split(',').map(Number),
+};
 
 exports.icons = {
   tomato: {

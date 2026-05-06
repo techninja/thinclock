@@ -56,15 +56,18 @@ exports.icons = {
 };
 
 exports.screen = (config) => ({
-  duration: 30000,
+  duration: 15000,
   data_url: 'self://ping',
   layers: [
     { type: 'icon', name: 'wifi_net', x: 0, y: 0 },
-    { type: 'native', label: '{ping}', x: 10, y: 0, color: 'AAAAAA', large: false, spacing: 1 },
-    { type: 'native', label: '{rssi}', x: 21, y: 0, color: '666688', large: false, spacing: 1 },
-    // Signal strength bar along bottom
-    { type: 'gauge', style: 'hbar', x: 9, y: 6, width: 22, height: 2,
-      value_key: 'rssi',
-      range: { min: -90, max: -30, stops: [[0,'FF2200'],[0.3,'FF8800'],[0.5,'FFCC00'],[0.7,'88FF00'],[1,'00FF44']] } },
+    // Ping value in ms
+    { type: 'native', label: '{ping}', x: 10, y: 1, color: 'AAAAAA', large: false, spacing: 1 },
+    // Signal bars (5 bars using dots, filled based on RSSI)
+    // RSSI: -30=excellent, -50=good, -70=ok, -80=weak, -90=terrible
+    // We'll render this as 5 vertical bars of increasing height
+    { type: 'pixels', pattern: 'dots', x: 24, y: 7, color: '00FF44', points: [[0,0],[1,0]] },
+    { type: 'pixels', pattern: 'dots', x: 26, y: 6, color: '00FF44', points: [[0,0],[1,0],[0,1],[1,1]] },
+    { type: 'pixels', pattern: 'dots', x: 28, y: 5, color: '88FF00', points: [[0,0],[1,0],[0,1],[1,1],[0,2],[1,2]] },
+    { type: 'pixels', pattern: 'dots', x: 30, y: 4, color: 'FFCC00', points: [[0,0],[1,0],[0,1],[1,1],[0,2],[1,2],[0,3],[1,3]] },
   ],
 });

@@ -41,6 +41,7 @@ static ParticleConfig parseParticles(JsonObject pc) {
     else if (strcmp(edgeStr, "wrap") == 0) cfg.edge = PB_WRAP;
     else cfg.edge = PB_DIE;
     cfg.mask = pc["mask"] | "";
+    cfg.warmup = pc["warmup"] | 0;
     if (pc["colors"].is<JsonObject>()) {
         cfg.colors = parseColorRange(pc["colors"]);
     }

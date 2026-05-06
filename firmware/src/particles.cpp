@@ -14,6 +14,14 @@ void ParticleSystem::init(const ParticleConfig& cfg) {
             }
         }
     }
+
+    // Pre-simulate to fill screen immediately
+    if (config.warmup > 0) {
+        uint16_t steps = config.warmup / 20; // simulate in 20ms steps
+        for (uint16_t i = 0; i < steps; i++) {
+            tick(20);
+        }
+    }
 }
 
 bool ParticleSystem::isMaskSolid(int16_t x, int16_t y) {

@@ -81,6 +81,7 @@ struct ParticleConfig {
     ParticleBehavior edge;
     ColorRange colors;
     String mask;
+    uint16_t warmup;  // ms to pre-simulate on init (fills screen immediately)
     bool active;
 };
 

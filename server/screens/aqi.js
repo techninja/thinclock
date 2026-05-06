@@ -45,7 +45,7 @@ exports.screen = (config) => {
   const indicatorX = Math.min(31, Math.round((aqi / 300) * 31));
 
   return {
-    duration: 30000,
+    duration: 12000,
     data_url: `${config.BASE}/data/aqi`,
     layers: [
       // Full-width EPA color gradient bar across bottom rows
