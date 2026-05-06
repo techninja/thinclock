@@ -1,235 +1,169 @@
-# Clock Top JSON Format Specification
+# thinclock JSON Config Format
 
-**Version: 0.1.0 (MVP)**
+**Version: 0.9.0**
 
-Clock Top is a config-driven firmware for ESP32 LED matrix displays. The device
-fetches a single JSON config from a URL, then renders screens as defined in that
-config. Any system that can serve JSON can drive the display.
+The device GETs a config URL every 30 seconds and renders whatever it receives.
 
----
-
-## Overview
-
-```
-Device boots
-  → Connects to WiFi
-  → Fetches config from config_url
-  → For each screen:
-      → Fetches data from screen's data_url (if set)
-      → Resolves {placeholders} in label text
-      → Renders text with scroll/color/position
-      → Waits for duration, then next screen
-  → Loops forever, re-fetching config every 30s
-```
-
----
-
-## Config Endpoint
-
-The device GETs this URL and expects the following JSON structure.
-
-### Top-Level Object
-
-| Field      | Type     | Required | Description                    |
-|------------|----------|----------|--------------------------------|
-| `settings` | object   | no       | Global display settings        |
-| `screens`  | array    | yes      | Ordered list of screen objects |
-| `sprites`  | array    | no       | Named sprite definitions (WIP) |
-
-### Settings Object
-
-| Field          | Type   | Default | Description                        |
-|----------------|--------|---------|------------------------------------|
-| `brightness`   | int    | 40      | LED brightness (0-255)             |
-| `timezone`     | int    | 0       | UTC offset in hours                |
-| `scroll_speed` | int    | 50      | Default scroll speed (ms per pixel)|
-
-### Screen Object
-
-| Field          | Type   | Default    | Description                              |
-|----------------|--------|------------|------------------------------------------|
-| `label`        | string | `""`       | Display text. Supports `{key}` placeholders resolved from `data_url` response |
-| `data_url`     | string | `""`       | URL returning flat JSON for placeholder values. Empty = no data fetch |
-| `duration`     | int    | 5000       | Milliseconds to display this screen      |
-| `x`            | int    | 0          | Text X position in pixels. -1 = auto     |
-| `y`            | int    | 0          | Text Y position in pixels. -1 = auto     |
-| `color`        | string | `"FFFFFF"` | Text color as 6-digit RGB hex (no `#`)   |
-| `scroll`       | string | `"auto"`   | Scroll mode (see below)                  |
-| `scroll_speed` | int    | (global)   | Override scroll speed for this screen    |
-| `fade_edge`    | int    | 2          | Pixels to fade at left/right edges during scroll (0 = off) |
-| `icon`         | string | `""`       | Sprite name reference (WIP)              |
-
-### Scroll Modes
-
-| Mode     | Behavior |
-|----------|----------|
-| `none`   | Static text, no scrolling. Text clips at display edge |
-| `auto`   | Uses `bounce` if text is wider than display, otherwise `none` |
-| `bounce` | Scrolls left until end of text is visible, pauses, scrolls back right, pauses, repeats |
-| `left`   | Banner style. Text enters from right, scrolls fully off left edge to black, then re-enters from right |
-
-### Sprite Object (WIP — not yet implemented)
-
-| Field    | Type   | Default | Description                          |
-|----------|--------|---------|--------------------------------------|
-| `name`   | string | `""`    | Reference name used by screen `icon` |
-| `url`    | string | `""`    | URL to RGB888 packed pixel data      |
-| `width`  | int    | 8       | Sprite width in pixels               |
-| `height` | int    | 8       | Sprite height in pixels              |
-| `frames` | int    | 1       | Number of animation frames           |
-
----
-
-## Data Endpoint
-
-Each screen's `data_url` should return **flat JSON** with string, number, or
-integer values. Keys are matched to `{placeholder}` tokens in the screen's
-`label`.
-
-```json
-{"temperature": 72.5, "humidity": 45, "status": "OK"}
-```
-
-With a label of `"{temperature}F {status}"`, this renders as `"72.5F OK"`.
-
-- Floats render with 1 decimal place
-- Integers render as-is
-- Strings render as-is
-- Missing keys render as empty string
-
----
-
-## Device Setup
-
-### Serial Configuration
-
-On first boot (or after flash erase), send WiFi credentials via serial at
-115200 baud:
-
-```json
-{"ssid": "MyNetwork", "pass": "MyPassword", "config_url": "http://192.168.1.100:3000/config"}
-```
-
-Credentials are stored in non-volatile storage and persist across reboots.
-
-### Fallback Behavior
-
-When no config is available (no WiFi, no config_url, or fetch fails), the
-device displays a basic clock:
-- NTP-synced time if WiFi is connected
-- Uptime counter if no network
-
----
-
-## Hardware
-
-| Component  | Detail                          |
-|------------|---------------------------------|
-| Board      | ESP32-D0WD (Ulanzi TC001)       |
-| Display    | 32×8 WS2812 addressable LEDs    |
-| LED Pin    | GPIO 32                         |
-| Buzzer     | GPIO 15 (active high, held low) |
-| Buttons    | GPIO 26, 27, 14                 |
-| LDR        | GPIO 35                         |
-| Font       | 5×7 pixels (Adafruit GFX default) |
-
----
-
-## Examples
-
-### Minimal Config — Just a Clock
+## Config Structure
 
 ```json
 {
-  "screens": [
-    {
-      "label": "{time}",
-      "data_url": "http://myserver/time",
-      "duration": 60000,
-      "x": 2, "y": 0,
-      "color": "00AAFF",
-      "scroll": "none"
+  "settings": { ... },
+  "screens": [ ... ],
+  "icons": { ... }
+}
+```
+
+## Settings
+
+```json
+{
+  "brightness": 40,
+  "timezone": -5,
+  "scroll_speed": 50,
+  "time_format": "12h",
+  "temp_unit": "F",
+  "event_url": "http://server:3232/event",
+  "buttons": "navigate",
+  "allow_beep": true,
+  "transition": 12
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `brightness` | int | 40 | LED brightness (0-255) |
+| `timezone` | int | 0 | UTC offset in hours |
+| `scroll_speed` | int | 50 | Default scroll speed (ms/pixel) |
+| `time_format` | string | `"24h"` | `"12h"` or `"24h"` |
+| `temp_unit` | string | `"C"` | `"C"` or `"F"` |
+| `event_url` | string | `""` | URL to POST button events |
+| `buttons` | string | `"navigate"` | `"navigate"` or `"events"` |
+| `allow_beep` | bool | true | Global buzzer enable |
+| `transition` | int | 12 | Crossfade speed (higher = faster) |
+
+## Screens
+
+Each screen is an ordered array of layers with a duration and optional data source.
+
+```json
+{
+  "duration": 10000,
+  "data_url": "http://server/data/endpoint",
+  "layers": [ ... ]
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `duration` | int | 5000 | ms to display before cycling |
+| `data_url` | string | `""` | JSON endpoint for `{placeholder}` values |
+| `layers` | array | required | Ordered render layers |
+
+## Layers
+
+See [SCREENS.md](SCREENS.md) for complete layer type documentation.
+
+Every layer supports:
+```json
+{
+  "type": "...",
+  "x": 0, "y": 0,
+  "opacity": 255,
+  "blend": "normal",
+  "tweens": []
+}
+```
+
+## Icons
+
+Named icon definitions referenced by layers.
+
+```json
+{
+  "icons": {
+    "my_icon": {
+      "width": 8, "height": 8, "fps": 0,
+      "data": ["hex_rgb888_string_per_frame"],
+      "remap_key": "FF0000",
+      "remap_value_key": "temperature",
+      "remap_range": { "min": 0, "max": 100, "stops": [...] }
     }
+  }
+}
+```
+
+### Icon Data Format
+- RGB888 hex string, row-major: `"FF0000FF000000FF00..."` (3 bytes per pixel)
+- `000000` = transparent (black)
+- Multiple strings in `data` array = animation frames
+- `fps` > 0 enables frame cycling
+
+### Color Remapping
+Set `remap_key` to a hex color present in the icon. At render time, all pixels matching that color are replaced with a color interpolated from `remap_range` based on the value of `remap_value_key` from the screen's data.
+
+## Color Range Format
+
+Used by gauges, gradients, particles, and icon remapping:
+
+```json
+{
+  "min": 0, "max": 100,
+  "stops": [[0, "0000FF"], [0.5, "00FF00"], [1, "FF0000"]]
+}
+```
+
+Each stop is `[position (0-1), "RRGGBB"]`. Colors interpolate linearly between stops.
+
+## Data Endpoints
+
+Screen `data_url` should return flat JSON:
+```json
+{"temperature": 72, "humidity": 45, "status": "OK"}
+```
+
+Keys match `{placeholder}` tokens in text/native layer labels.
+
+### Special URLs
+- `self://sensors` — device's onboard temp/humidity/light (no network)
+- `self://ping` — device HTTP ping to 1.1.1.1 (latency + RSSI)
+
+## Example: Full Clock Screen
+
+```json
+{
+  "duration": 30000,
+  "data_url": "http://server:3232/data/datetime",
+  "layers": [
+    { "type": "gradient", "x": 1, "y": 2, "width": 7, "height": 6,
+      "direction": "vertical",
+      "colors": { "min": 0, "max": 1, "stops": [[0,"FFFFFF"],[1,"DDCCAA"]] } },
+    { "type": "icon", "name": "calendar", "x": 0, "y": 0 },
+    { "type": "native", "label": "{day}", "x": 3, "y": 2, "color": "000000" },
+    { "type": "clock", "format": "12h", "x": 12, "y": 1, "color": "4488FF",
+      "large": false, "spacing": 1 },
+    { "type": "pixels", "pattern": "week_dots", "x": 10, "y": 7,
+      "color": "4488FF", "dim_color": "112244" }
   ]
 }
 ```
 
-Where `/time` returns: `{"time": "14:30"}`
-
-### Multi-Screen Dashboard
+## Example: Particles + Icon Composited
 
 ```json
 {
-  "settings": {
-    "brightness": 60,
-    "scroll_speed": 50
-  },
-  "screens": [
-    {
-      "label": "{time}",
-      "data_url": "http://myserver/data/clock",
-      "duration": 10000,
-      "x": 2, "y": 0,
-      "color": "00AAFF",
-      "scroll": "none"
-    },
-    {
-      "label": "{temp}F {humidity}%",
-      "data_url": "http://myserver/data/weather",
-      "duration": 5000,
-      "x": 0, "y": 0,
-      "color": "FF8800",
-      "scroll": "auto"
-    },
-    {
-      "label": "Welcome to Clock Top!",
-      "duration": 10000,
-      "x": 0, "y": 0,
-      "color": "FF0088",
-      "scroll": "left",
-      "scroll_speed": 40,
-      "fade_edge": 3
-    }
+  "duration": 12000,
+  "layers": [
+    { "type": "gradient", "x": 0, "y": 0, "width": 32, "height": 6,
+      "direction": "vertical",
+      "colors": { "min": 0, "max": 1, "stops": [[0,"030308"],[1,"101028"]] } },
+    { "type": "icon", "name": "tree", "x": 22, "y": 0 },
+    { "type": "particles", "gravity": 3, "edge": "die", "blend": "add",
+      "colors": { "min": 0, "max": 1, "stops": [[0,"000000"],[0.3,"444466"],[0.7,"444466"],[1,"000000"]] },
+      "emitters": [
+        { "x": -1, "y": -1, "vx_min": 0, "vx_max": 0, "vy_min": 0, "vy_max": 0,
+          "rate": 1.5, "life_min": 2000, "life_max": 4000, "size": 1 }
+      ] }
   ]
 }
 ```
-
-### Home Assistant Integration
-
-Serve config from a Node/Python/etc server that reads HA sensors:
-
-```json
-{
-  "screens": [
-    {
-      "label": "{temp}F",
-      "data_url": "http://ha-bridge:3000/sensor/living_room_temp",
-      "duration": 5000,
-      "color": "FF4400",
-      "scroll": "auto"
-    },
-    {
-      "label": "{state}",
-      "data_url": "http://ha-bridge:3000/sensor/front_door",
-      "duration": 5000,
-      "color": "44FF44",
-      "scroll": "none"
-    }
-  ]
-}
-```
-
----
-
-## Roadmap
-
-- [ ] Sprite/icon rendering (fetch, cache to SPIFFS, display alongside text)
-- [ ] Multi-frame sprite animation
-- [ ] Second font size (smaller 3×5 for compact data)
-- [ ] Screen transition effects (fade, slide)
-- [ ] Text alignment (center, right)
-- [ ] Background color per screen
-- [ ] Button input events (POST to a callback URL)
-- [ ] LDR auto-brightness
-- [ ] Captive portal for WiFi setup (no serial needed)
-- [ ] OTA firmware updates
