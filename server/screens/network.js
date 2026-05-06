@@ -14,6 +14,7 @@ exports.alerts = [
     },
     message: 'Slow internet',
     color: 'FFAA00',
+    icon: 'wifi_net',
     beep: 'single',
     cooldown: 300000, // 5 min
   },
@@ -25,6 +26,7 @@ exports.alerts = [
     },
     message: 'Internet down!',
     color: 'FF0000',
+    icon: 'wifi_net',
     beep: 'alert',
     cooldown: 60000, // 1 min
   },

@@ -91,9 +91,9 @@ int16_t Display::nativeTextWidth(const String& text, uint8_t spacing, bool large
         char ch = text[i];
         if ((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
             w += charW + spacing;
-        } else if (ch == ':' || ch == '.' || ch == '!') {
+        } else if (ch == ':' || ch == '.' || ch == '!' || ch == '@') {
             w += 1 + spacing;
-        } else if (ch == '-') {
+        } else if (ch == '-' || ch == '/') {
             w += 3 + spacing;
         } else if (ch == ' ') {
             w += 2;
@@ -317,6 +317,17 @@ int16_t Display::drawNativeText(const String& text, int16_t x, int16_t y, uint32
             drawPixel(cx + 1, y + 2, color);
             drawPixel(cx + 2, y + 2, color);
             cx += 3 + spacing;
+        } else if (ch == '/') {
+            drawPixel(cx + 2, y, color);
+            drawPixel(cx + 1, y + 1, color);
+            drawPixel(cx + 1, y + 2, color);
+            drawPixel(cx, y + 3, color);
+            drawPixel(cx, y + 4, color);
+            cx += 3 + spacing;
+        } else if (ch == '@') {
+            // Renders as a small dot — used as compact separator
+            drawPixel(cx, y + 4, color);
+            cx += 1 + spacing;
         } else if (ch == '%') {
             drawPixel(cx, y, color);
             drawPixel(cx + 2, y + (large ? 6 : 4), color);

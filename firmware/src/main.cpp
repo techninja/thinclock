@@ -71,7 +71,7 @@ int16_t notifScrollX = 0;
 uint32_t notifLastScroll = 0;
 uint32_t notifOpenTime = 0;
 #define NOTIF_TIMEOUT_MS 60000
-#define NOTIF_SCROLL_SPEED 45
+#define NOTIF_SCROLL_SPEED 80
 
 // Timer
 Timer timer = {0, 0, 0x00AAFF, false, false};
@@ -358,6 +358,7 @@ void handleNotify() {
         Notification& n = notifications[notifCount];
         n.active = true;
         n.color = strtoul((doc["color"] | "FFAA00"), NULL, 16);
+        n.icon_name = doc["icon"] | "";
         n.layers.clear();
         // Simple text notification shorthand
         if (doc["text"].is<const char*>()) {
@@ -372,8 +373,6 @@ void handleNotify() {
             l.opacity = 255;
             n.layers.push_back(l);
         }
-        // Full layers array
-        // (simplified: just support text for now)
 
         // Beep config
         const char* beepStr = doc["beep"] | "single";
@@ -979,19 +978,44 @@ void loop() {
                 }
                 if (notifSlideY >= 0) {
                     Notification& n = notifications[notifViewerIdx];
+                    int16_t textY = notifSlideY + 2;
+                    int16_t iconW = 0;
+
+                    // Draw icon if present
+                    if (!n.icon_name.isEmpty() && config.icons.count(n.icon_name)) {
+                        Icon& icon = config.icons[n.icon_name];
+                        if (!icon.frames.empty()) {
+                            // Scale to fit: use 6px tall area (below border)
+                            display.drawSprite(icon.frames[0].data(), icon.width, min((uint8_t)6, icon.height), 0, textY - 1);
+                            iconW = icon.width + 1;
+                        }
+                    }
+
+                    // Draw text (offset by icon width, clipped to not overlap icon)
                     for (auto& l : n.layers) {
                         if (l.type == LAYER_TEXT) {
                             int16_t textW = display.nativeTextWidth(l.label);
-                            int16_t textY = notifSlideY + 2;
-                            if (textW <= MATRIX_WIDTH) {
-                                display.drawNativeText(l.label, (MATRIX_WIDTH - textW) / 2, textY, l.color, 1, false);
+                            int16_t availW = MATRIX_WIDTH - iconW;
+                            if (textW <= availW) {
+                                display.drawNativeText(l.label, iconW + (availW - textW) / 2, textY, l.color, 1, false);
                             } else {
                                 int16_t drawX = MATRIX_WIDTH - notifScrollX;
                                 display.drawNativeText(l.label, drawX, textY, l.color, 1, false);
+                                // Clear icon zone so text doesn't bleed over it
+                                if (iconW > 0) {
+                                    display.clearRect(0, textY - 1, iconW, 7);
+                                    // Redraw icon
+                                    if (!n.icon_name.isEmpty() && config.icons.count(n.icon_name)) {
+                                        Icon& ic = config.icons[n.icon_name];
+                                        if (!ic.frames.empty()) {
+                                            display.drawSprite(ic.frames[0].data(), ic.width, min((uint8_t)6, ic.height), 0, textY - 1);
+                                        }
+                                    }
+                                }
                                 if (now - notifLastScroll >= NOTIF_SCROLL_SPEED) {
                                     notifScrollX++;
                                     notifLastScroll = now;
-                                    if (drawX + textW < 0) notifScrollX = 0;
+                                    if (drawX + textW < iconW) notifScrollX = 0;
                                 }
                             }
                         }

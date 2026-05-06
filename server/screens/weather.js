@@ -20,6 +20,7 @@ exports.alerts = [
     },
     message: 'Rain starting',
     color: '4488FF',
+    icon: 'weather_cloud',
     beep: 'single',
     cooldown: 1800000,
   },
@@ -31,6 +32,7 @@ exports.alerts = [
     },
     message: 'Severe weather!',
     color: 'FF0000',
+    icon: 'weather_storm',
     beep: 'alert',
     cooldown: 3600000, // 1 hour
   },

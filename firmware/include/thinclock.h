@@ -165,8 +165,9 @@ struct Screen {
 struct Notification {
     std::vector<Layer> layers;
     uint32_t color;
-    uint8_t beep;       // 0=none, 1=single, 2=alert (repeating)
-    uint32_t alertInterval; // ms between alert beeps
+    String icon_name;   // optional icon to show left of text
+    uint8_t beep;
+    uint32_t alertInterval;
     uint32_t lastBeep;
     bool active;
 };

@@ -75,18 +75,33 @@ class AlertEngine {
     this.lastFired[alert.id] = Date.now();
     console.log(`[alert] ${alert.id}: ${alert.message}`);
 
+    // Compact timestamp: M/D H:MMA (e.g. "5/6 7:30P")
+    const now = new Date();
+    const tz = this.timezone || 0;
+    const local = new Date(now.getTime() + tz * 3600000);
+    const month = local.getUTCMonth() + 1;
+    const day = local.getUTCDate();
+    let hours = local.getUTCHours();
+    const mins = String(local.getUTCMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'P' : 'A';
+    hours = hours % 12 || 12;
+    const timestamp = `${month}/${day} ${hours}:${mins}${ampm}`;
+
+    const text = `${timestamp}: ${alert.message}`;
+
     const data = JSON.stringify({
-      text: alert.message,
+      text,
       color: alert.color || 'FFAA00',
       beep: alert.beep || 'single',
+      icon: alert.icon || '',
     });
 
     try {
       const req = http.request(`http://${this.deviceIP}/notify`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': data.length },
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
       });
-      req.on('error', () => {}); // ignore connection errors
+      req.on('error', () => {});
       req.write(data);
       req.end();
     } catch (e) {}

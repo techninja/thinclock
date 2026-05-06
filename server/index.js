@@ -45,7 +45,7 @@ ha.setup(app, config);
 
 // --- Alert engine ---
 const AlertEngine = require('./lib/alerts');
-const alerts = new AlertEngine({ deviceIP: process.env.DEVICE_IP });
+const alerts = new AlertEngine({ deviceIP: process.env.DEVICE_IP, timezone: config.timezone });
 config.alerts = alerts;
 
 // Poll device data and do server-side ping for alerts
