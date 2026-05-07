@@ -482,6 +482,37 @@ void setupWiFi() {
             }
             httpServer.send(200, "application/json", "{\"ok\":true}");
         });
+        // Direct display control: push layers to render immediately
+        httpServer.on("/display", HTTP_POST, []() {
+            // POST /display {"layers":[...], "duration": 5000}
+            // Temporarily overrides current screen with provided layers
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, httpServer.arg("plain"));
+            if (err) { httpServer.send(400, "application/json", "{\"error\":\"parse\"}"); return; }
+            // TODO: parse layers and render as temporary override screen
+            httpServer.send(200, "application/json", "{\"ok\":true}");
+        });
+
+        // Device info
+        httpServer.on("/info", HTTP_GET, []() {
+            JsonDocument doc;
+            doc["firmware"] = "thinclock";
+            doc["version"] = "0.9.0";
+            doc["build"] = __DATE__ " " __TIME__;
+            doc["chip"] = ESP.getChipModel();
+            doc["flash"] = ESP.getFlashChipSize();
+            doc["free_heap"] = ESP.getFreeHeap();
+            doc["uptime"] = millis() / 1000;
+            doc["wifi_ssid"] = WiFi.SSID();
+            doc["ip"] = WiFi.localIP().toString();
+            doc["rssi"] = WiFi.RSSI();
+            doc["config_url"] = configURL;
+            String out; serializeJson(doc, out);
+            httpServer.send(200, "application/json", out);
+        });
+
+        // CORS for browser UI access
+        httpServer.enableCORS(true);
         httpServer.begin();
     }
 }
