@@ -2,9 +2,7 @@ export const name = 'Night Clock';
 export const enabled = true;
 export const priority = 10;
 export const tags = ['utility', 'clock', 'night'];
-export const schedule = {
-  hours: [22, 23, 0, 1, 2, 3, 4, 5, 6],
-};
+export const schedule = 'night';
 
 export const screen = (config) => {
   // Calculate sunrise progress during the last night hour
@@ -22,11 +20,20 @@ export const screen = (config) => {
   }
 
   // Interpolate colors based on progress
+  /**
+   *
+   */
   function lerpColor(c1, c2, t) {
-    const r1 = parseInt(c1.slice(0,2),16), g1 = parseInt(c1.slice(2,4),16), b1 = parseInt(c1.slice(4,6),16);
-    const r2 = parseInt(c2.slice(0,2),16), g2 = parseInt(c2.slice(2,4),16), b2 = parseInt(c2.slice(4,6),16);
-    const r = Math.round(r1 + (r2-r1)*t), g = Math.round(g1 + (g2-g1)*t), b = Math.round(b1 + (b2-b1)*t);
-    return [r,g,b].map(v => v.toString(16).padStart(2,'0')).join('');
+    const r1 = parseInt(c1.slice(0, 2), 16),
+      g1 = parseInt(c1.slice(2, 4), 16),
+      b1 = parseInt(c1.slice(4, 6), 16);
+    const r2 = parseInt(c2.slice(0, 2), 16),
+      g2 = parseInt(c2.slice(2, 4), 16),
+      b2 = parseInt(c2.slice(4, 6), 16);
+    const r = Math.round(r1 + (r2 - r1) * t),
+      g = Math.round(g1 + (g2 - g1) * t),
+      b = Math.round(b1 + (b2 - b1) * t);
+    return [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
   }
 
   // Night: pure black. Dawn: warm gradient from bottom
@@ -46,23 +53,64 @@ export const screen = (config) => {
   // Sunrise gradient (fades in from bottom)
   if (sunriseProgress > 0) {
     layers.push({
-      type: 'gradient', x: 0, y: 0, width: 32, height: 8, direction: 'vertical',
-      colors: { min: 0, max: 1, stops: [[0, skyTop], [0.5, skyMid], [1, skyBot]] },
+      type: 'gradient',
+      x: 0,
+      y: 0,
+      width: 32,
+      height: 8,
+      direction: 'vertical',
+      colors: {
+        min: 0,
+        max: 1,
+        stops: [
+          [0, skyTop],
+          [0.5, skyMid],
+          [1, skyBot],
+        ],
+      },
     });
   }
 
   // Clock
   layers.push({
-    type: 'clock', format: config.time_format, x: 4, y: 0,
-    color: clockColor, large: true, spacing: 1,
+    type: 'clock',
+    format: config.time_format,
+    x: 4,
+    y: 0,
+    color: clockColor,
+    large: true,
+    spacing: 1,
   });
 
   // Particles (shift warmer at dawn)
   layers.push({
-    type: 'particles', gravity: -0.5, edge: 'wrap', opacity: 120, blend: 'add',
-    colors: { min: 0, max: 1, stops: [[0, particleBase], [0.5, particleMid], [1, particleBase]] },
+    type: 'particles',
+    gravity: -0.5,
+    edge: 'wrap',
+    opacity: 120,
+    blend: 'add',
+    colors: {
+      min: 0,
+      max: 1,
+      stops: [
+        [0, particleBase],
+        [0.5, particleMid],
+        [1, particleBase],
+      ],
+    },
     emitters: [
-      { x: -1, y: 7, vx_min: -0.3, vx_max: 0.3, vy_min: -1, vy_max: -0.3, rate: 2, life_min: 4000, life_max: 8000, size: 1 },
+      {
+        x: -1,
+        y: 7,
+        vx_min: -0.3,
+        vx_max: 0.3,
+        vy_min: -1,
+        vy_max: -0.3,
+        rate: 2,
+        life_min: 4000,
+        life_max: 8000,
+        size: 1,
+      },
     ],
   });
 

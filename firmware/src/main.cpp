@@ -10,6 +10,9 @@
 #include "sensors.h"
 #include "gauge.h"
 #include "particles.h"
+#include "gif_encoder.h"
+#include "render_client.h"
+#include "screen_state.h"
 
 Display display;
 ConfigManager configMgr;
@@ -17,38 +20,13 @@ Config config;
 Preferences prefs;
 Sensors sensors;
 WebServer httpServer(80);
+RenderClient renderClient;
 
 String wifiSSID, wifiPass, configURL;
 uint32_t lastConfigFetch = 0, lastDataFetch = 0, lastSensorRead = 0;
 uint32_t lastScreenSwitch = 0, lastButtonCheck = 0;
 int currentScreen = 0;
 JsonDocument screenData;
-
-// --- Per-layer state ---
-struct TextState {
-    int16_t offset = 0;
-    int8_t dir = 1;
-    uint32_t pauseUntil = 0;
-    uint32_t lastStep = 0;
-    ScrollMode mode = SCROLL_NONE;
-    int16_t textW = 0;
-    bool completedOnce = false;
-    String resolved;
-};
-
-struct IconState {
-    uint8_t frame = 0;
-    uint32_t lastStep = 0;
-};
-
-struct ScreenState {
-    std::vector<TextState> textStates;
-    std::vector<IconState> iconStates;
-    std::vector<ParticleSystem> particleSystems;
-    uint32_t lastTick = 0;
-    uint32_t startTime = 0;
-    bool inited = false;
-};
 
 ScreenState currentState;
 ScreenState prevState;
@@ -127,8 +105,10 @@ void beepTriple() {
 
 // Forward declarations
 void resetState(ScreenState& state);
+void initScreenState(ScreenState& state, Screen& scr);
 void switchScreen();
 void postEvent(const char* event);
+void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data);
 
 // --- Buttons ---
 void navigatePrev() {
@@ -511,9 +491,334 @@ void setupWiFi() {
             httpServer.send(200, "application/json", out);
         });
 
+        // Raw framebuffer: 768 bytes RGB (32x8x3), logical pixel order
+        httpServer.on("/framebuffer", HTTP_GET, []() {
+            const uint8_t* fb = display.getFramebuffer();
+            // Unzigzag: convert physical LED order to logical x,y order
+            static uint8_t linear[NUM_LEDS * 3];
+            for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
+                for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+                    uint8_t physX = (y % 2 == 0) ? x : (MATRIX_WIDTH - 1 - x);
+                    uint16_t src = (y * MATRIX_WIDTH + physX) * 3;
+                    uint16_t dst = (y * MATRIX_WIDTH + x) * 3;
+                    linear[dst] = fb[src];
+                    linear[dst + 1] = fb[src + 1];
+                    linear[dst + 2] = fb[src + 2];
+                }
+            }
+            WiFiClient client = httpServer.client();
+            client.print("HTTP/1.1 200 OK\r\n");
+            client.print("Content-Type: application/octet-stream\r\n");
+            client.printf("Content-Length: %d\r\n", NUM_LEDS * 3);
+            client.print("Cache-Control: no-store\r\n");
+            client.print("Access-Control-Allow-Origin: *\r\n");
+            client.print("Connection: close\r\n\r\n");
+            client.write(linear, NUM_LEDS * 3);
+        });
+
+        // Preview: render N frames of a screen, stream as raw RGB
+        // GET /preview?screen=0&frames=30
+        httpServer.on("/preview", HTTP_GET, []() {
+            if (!config.valid || config.screens.empty()) {
+                httpServer.send(400, "application/json", "{\"error\":\"no config\"}");
+                return;
+            }
+            int screenIdx = httpServer.arg("screen").toInt();
+            int frames = httpServer.arg("frames").toInt();
+            if (screenIdx < 0 || screenIdx >= (int)config.screens.size()) {
+                httpServer.send(400, "application/json", "{\"error\":\"invalid screen\"}");
+                return;
+            }
+            if (frames < 1) frames = 1;
+            if (frames > 120) frames = 120;
+
+            uint32_t totalBytes = NUM_LEDS * 3 * frames;
+            WiFiClient client = httpServer.client();
+            client.print("HTTP/1.1 200 OK\r\n");
+            client.print("Content-Type: application/octet-stream\r\n");
+            client.printf("Content-Length: %d\r\n", totalBytes);
+            client.printf("X-Frames: %d\r\n", frames);
+            client.printf("X-Frame-Ms: %d\r\n", 20);
+            client.print("Cache-Control: public, max-age=60\r\n");
+            client.print("Access-Control-Allow-Origin: *\r\n");
+            client.print("Connection: close\r\n\r\n");
+
+            // Save current render buffer so live display isn't corrupted
+            static CRGB savedBuf[NUM_LEDS];
+            const uint8_t* fbSave = display.getFramebuffer();
+            memcpy(savedBuf, fbSave, sizeof(savedBuf));
+
+            // Render frames using isolated state
+            Screen& scr = config.screens[screenIdx];
+            ScreenState previewState;
+            resetState(previewState);
+            initScreenState(previewState, scr);
+            JsonDocument previewData;
+            if (!scr.data_url.isEmpty()) {
+                configMgr.fetchData(scr.data_url, previewData);
+            }
+
+            static uint8_t linear[NUM_LEDS * 3];
+            for (int f = 0; f < frames; f++) {
+                display.clear();
+                renderScreen(scr, previewState, previewData);
+                const uint8_t* fb = display.getFramebuffer();
+                // Unzigzag
+                for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
+                    for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+                        uint8_t physX = (y % 2 == 0) ? x : (MATRIX_WIDTH - 1 - x);
+                        uint16_t src = (y * MATRIX_WIDTH + physX) * 3;
+                        uint16_t dst = (y * MATRIX_WIDTH + x) * 3;
+                        linear[dst] = fb[src];
+                        linear[dst + 1] = fb[src + 1];
+                        linear[dst + 2] = fb[src + 2];
+                    }
+                }
+                client.write(linear, NUM_LEDS * 3);
+                yield();
+            }
+
+            // Restore render buffer
+            memcpy((void*)fbSave, savedBuf, sizeof(savedBuf));
+        });
+
+        // Render arbitrary layers: POST /render {"layers":[...], "frames":30, "display":false}
+        httpServer.on("/render", HTTP_POST, []() {
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, httpServer.arg("plain"));
+            if (err) { httpServer.send(400, "application/json", "{\"error\":\"parse\"}"); return; }
+
+            int frames = doc["frames"] | 1;
+            if (frames < 1) frames = 1;
+            if (frames > 120) frames = 120;
+            bool showOnDevice = doc["display"] | false;
+
+            // Parse into a temporary Screen
+            Screen tmpScreen;
+            tmpScreen.duration = 0;
+            tmpScreen.data_url = doc["data_url"] | "";
+            for (JsonObject l : doc["layers"].as<JsonArray>()) {
+                tmpScreen.layers.push_back(configMgr.parseLayer(l, config.scroll_speed));
+            }
+            // Merge any provided icons into config
+            if (doc["icons"].is<JsonObject>()) {
+                configMgr.parseIcons(doc["icons"].as<JsonObject>(), config.icons);
+            }
+
+            // Save render buffer
+            static CRGB savedBuf[NUM_LEDS];
+            const uint8_t* fbSave = display.getFramebuffer();
+            memcpy(savedBuf, fbSave, sizeof(savedBuf));
+
+            // Init state
+            ScreenState renderState;
+            resetState(renderState);
+            initScreenState(renderState, tmpScreen);
+
+            // Use inline data if provided
+            JsonDocument renderData;
+            if (doc["data"].is<JsonObject>()) {
+                renderData = doc["data"];
+            }
+
+            uint32_t totalBytes = NUM_LEDS * 3 * frames;
+            WiFiClient client = httpServer.client();
+            client.print("HTTP/1.1 200 OK\r\n");
+            client.print("Content-Type: application/octet-stream\r\n");
+            client.printf("Content-Length: %d\r\n", totalBytes);
+            client.printf("X-Frames: %d\r\n", frames);
+            client.printf("X-Frame-Ms: %d\r\n", 20);
+            client.print("Access-Control-Allow-Origin: *\r\n");
+            client.print("Connection: close\r\n\r\n");
+
+            static uint8_t linear[NUM_LEDS * 3];
+            for (int f = 0; f < frames; f++) {
+                display.clear();
+                renderScreen(tmpScreen, renderState, renderData);
+                const uint8_t* fb = display.getFramebuffer();
+                // Unzigzag
+                for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
+                    for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+                        uint8_t physX = (y % 2 == 0) ? x : (MATRIX_WIDTH - 1 - x);
+                        uint16_t src = (y * MATRIX_WIDTH + physX) * 3;
+                        uint16_t dst = (y * MATRIX_WIDTH + x) * 3;
+                        linear[dst] = fb[src];
+                        linear[dst + 1] = fb[src + 1];
+                        linear[dst + 2] = fb[src + 2];
+                    }
+                }
+                client.write(linear, NUM_LEDS * 3);
+                if (showOnDevice) display.show();
+                yield();
+            }
+
+            // Restore buffer (unless displaying on device)
+            if (!showOnDevice) {
+                memcpy((void*)fbSave, savedBuf, sizeof(savedBuf));
+            }
+        });
+
+        // GIF preview: GET /gif?screen=0&seconds=2
+        // Returns animated GIF with frame deduplication
+        httpServer.on("/gif", HTTP_GET, []() {
+            if (!config.valid || config.screens.empty()) {
+                httpServer.send(400, "application/json", "{\"error\":\"no config\"}");
+                return;
+            }
+            int screenIdx = httpServer.arg("screen").toInt();
+            int seconds = httpServer.arg("seconds").toInt();
+            if (screenIdx < 0 || screenIdx >= (int)config.screens.size()) {
+                httpServer.send(400, "application/json", "{\"error\":\"invalid screen\"}");
+                return;
+            }
+            if (seconds < 1) seconds = 1;
+            if (seconds > 10) seconds = 10;
+            int frames = seconds * 15;
+            uint8_t scale = httpServer.arg("scale").toInt();
+            uint8_t gap = httpServer.arg("gap").toInt();
+            uint8_t gamma = httpServer.arg("gamma").toInt();
+            if (scale < 1) scale = 1;
+            if (gamma < 10) gamma = 18; // default 1.8
+
+            // Save render buffer
+            static CRGB savedBuf[NUM_LEDS];
+            const uint8_t* fbSave = display.getFramebuffer();
+            memcpy(savedBuf, fbSave, sizeof(savedBuf));
+
+            Screen& scr = config.screens[screenIdx];
+            ScreenState gifState;
+            resetState(gifState);
+            initScreenState(gifState, scr);
+            JsonDocument gifData;
+            if (!scr.data_url.isEmpty()) {
+                configMgr.fetchData(scr.data_url, gifData);
+            }
+
+            WiFiClient client = httpServer.client();
+            client.print("HTTP/1.1 200 OK\r\n");
+            client.print("Content-Type: image/gif\r\n");
+            client.print("Cache-Control: public, max-age=60\r\n");
+            client.print("Access-Control-Allow-Origin: *\r\n");
+            client.print("Connection: close\r\n\r\n");
+
+            GifEncoder gif;
+            gif.begin(client, 66, scale, gap, gamma);
+
+            static uint8_t linear[NUM_LEDS * 3];
+            for (int f = 0; f < frames; f++) {
+                display.clear();
+                renderScreen(scr, gifState, gifData);
+                const uint8_t* fb = display.getFramebuffer();
+                memset(linear, 0, sizeof(linear));
+                for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
+                    for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+                        uint8_t physX = (y % 2 == 0) ? x : (MATRIX_WIDTH - 1 - x);
+                        uint16_t src = (y * MATRIX_WIDTH + physX) * 3;
+                        uint16_t dst = (y * MATRIX_WIDTH + x) * 3;
+                        linear[dst] = fb[src];
+                        linear[dst + 1] = fb[src + 1];
+                        linear[dst + 2] = fb[src + 2];
+                    }
+                }
+                gif.addFrame(linear);
+                delay(66); // advance real time so particles/tweens progress
+                yield();
+            }
+            gif.end();
+
+            memcpy((void*)fbSave, savedBuf, sizeof(savedBuf));
+        });
+
+        // POST /gif — render arbitrary layers as animated GIF
+        httpServer.on("/gif", HTTP_POST, []() {
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, httpServer.arg("plain"));
+            if (err) { httpServer.send(400, "application/json", "{\"error\":\"parse\"}"); return; }
+
+            int seconds = doc["seconds"] | 2;
+            if (seconds < 1) seconds = 1;
+            if (seconds > 10) seconds = 10;
+            int frames = seconds * 15;
+            uint8_t scale = doc["scale"] | 1;
+            uint8_t gap = doc["gap"] | 0;
+            uint8_t gamma = doc["gamma"] | 18;
+            if (scale < 1) scale = 1;
+            if (gamma < 10) gamma = 18;
+
+            Screen tmpScreen;
+            tmpScreen.duration = 0;
+            tmpScreen.data_url = doc["data_url"] | "";
+            for (JsonObject l : doc["layers"].as<JsonArray>()) {
+                tmpScreen.layers.push_back(configMgr.parseLayer(l, config.scroll_speed));
+            }
+            if (doc["icons"].is<JsonObject>()) {
+                configMgr.parseIcons(doc["icons"].as<JsonObject>(), config.icons);
+            }
+
+            static CRGB savedBuf[NUM_LEDS];
+            const uint8_t* fbSave = display.getFramebuffer();
+            memcpy(savedBuf, fbSave, sizeof(savedBuf));
+
+            ScreenState renderState;
+            resetState(renderState);
+            initScreenState(renderState, tmpScreen);
+            JsonDocument renderData;
+            if (doc["data"].is<JsonObject>()) {
+                renderData = doc["data"];
+            } else if (!tmpScreen.data_url.isEmpty()) {
+                configMgr.fetchData(tmpScreen.data_url, renderData);
+            }
+
+            WiFiClient client = httpServer.client();
+            client.print("HTTP/1.1 200 OK\r\n");
+            client.print("Content-Type: image/gif\r\n");
+            client.print("Cache-Control: public, max-age=60\r\n");
+            client.print("Access-Control-Allow-Origin: *\r\n");
+            client.print("Connection: close\r\n\r\n");
+
+            GifEncoder gif;
+            gif.begin(client, 66, scale, gap, gamma);
+            static uint8_t linear[NUM_LEDS * 3];
+            for (int f = 0; f < frames; f++) {
+                display.clear();
+                renderScreen(tmpScreen, renderState, renderData);
+                const uint8_t* fb = display.getFramebuffer();
+                memset(linear, 0, sizeof(linear));
+                for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
+                    for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+                        uint8_t physX = (y % 2 == 0) ? x : (MATRIX_WIDTH - 1 - x);
+                        uint16_t src = (y * MATRIX_WIDTH + physX) * 3;
+                        uint16_t dst = (y * MATRIX_WIDTH + x) * 3;
+                        linear[dst] = fb[src];
+                        linear[dst + 1] = fb[src + 1];
+                        linear[dst + 2] = fb[src + 2];
+                    }
+                }
+                gif.addFrame(linear);
+                delay(66);
+                yield();
+            }
+            gif.end();
+            memcpy((void*)fbSave, savedBuf, sizeof(savedBuf));
+        });
+
         // CORS for browser UI access
         httpServer.enableCORS(true);
         httpServer.begin();
+
+        // Start WebSocket render client — connect back to config server
+        if (!configURL.isEmpty()) {
+            // Extract host and port from config URL (http://host:port/path)
+            String url = configURL;
+            url.replace("http://", "");
+            int slashIdx = url.indexOf('/');
+            if (slashIdx > 0) url = url.substring(0, slashIdx);
+            int colonIdx = url.indexOf(':');
+            String host = colonIdx > 0 ? url.substring(0, colonIdx) : url;
+            uint16_t port = colonIdx > 0 ? url.substring(colonIdx + 1).toInt() : 80;
+            renderClient.begin(host, port);
+            Serial.printf("[ws] Connecting to %s:%d\n", host.c_str(), port);
+        }
     }
 }
 
@@ -736,7 +1041,17 @@ void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data) {
                 }
             }
             ts.resolved = buf;
-            display.drawNativeText(ts.resolved, layer.x, layer.y, layer.color, layer.native_spacing, layer.native_large);
+            int16_t clockX = layer.x;
+            if (layer.align == "center") {
+                int16_t tw = display.nativeTextWidth(ts.resolved, layer.native_spacing, layer.native_large);
+                int16_t area = layer.align_width > 0 ? layer.align_width : (MATRIX_WIDTH - layer.x);
+                clockX = layer.x + (area - tw) / 2;
+            } else if (layer.align == "right") {
+                int16_t tw = display.nativeTextWidth(ts.resolved, layer.native_spacing, layer.native_large);
+                int16_t area = layer.align_width > 0 ? layer.align_width : (MATRIX_WIDTH - layer.x);
+                clockX = layer.x + area - tw;
+            }
+            display.drawNativeText(ts.resolved, clockX, layer.y, layer.color, layer.native_spacing, layer.native_large);
             // PM indicator dot for 12h format
             if (layer.clock_format == "12h") {
                 struct tm t2;
@@ -757,7 +1072,17 @@ void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data) {
             } else if (!scr.data_url.isEmpty() && !data.isNull()) {
                 text = configMgr.resolvePlaceholders(layer.label, data);
             }
-            display.drawNativeText(text, layer.x, layer.y, layer.color, layer.native_spacing, layer.native_large);
+            int16_t natX = layer.x;
+            if (layer.align == "center") {
+                int16_t tw = display.nativeTextWidth(text, layer.native_spacing, layer.native_large);
+                int16_t area = layer.align_width > 0 ? layer.align_width : (MATRIX_WIDTH - layer.x);
+                natX = layer.x + (area - tw) / 2;
+            } else if (layer.align == "right") {
+                int16_t tw = display.nativeTextWidth(text, layer.native_spacing, layer.native_large);
+                int16_t area = layer.align_width > 0 ? layer.align_width : (MATRIX_WIDTH - layer.x);
+                natX = layer.x + area - tw;
+            }
+            display.drawNativeText(text, natX, layer.y, layer.color, layer.native_spacing, layer.native_large);
             break;
         }
 
@@ -901,6 +1226,8 @@ void setup() {
 void loop() {
     handleSerial();
     httpServer.handleClient();
+    renderClient.loop();
+    renderClient.tick(display, configMgr, config);
     uint32_t now = millis();
 
     if (now - lastButtonCheck > BUTTON_CHECK_MS) { checkButtons(); checkLDR(); lastButtonCheck = now; now = millis(); }

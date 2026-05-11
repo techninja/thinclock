@@ -64,7 +64,7 @@ static ParticleConfig parseParticles(JsonObject pc) {
     return cfg;
 }
 
-static Layer parseLayer(JsonObject l, uint32_t defaultScrollSpeed) {
+Layer ConfigManager::parseLayer(JsonObject l, uint32_t defaultScrollSpeed) {
     Layer layer;
     layer.x = l["x"] | (int16_t)0;
     layer.y = l["y"] | (int16_t)0;
@@ -108,6 +108,8 @@ static Layer parseLayer(JsonObject l, uint32_t defaultScrollSpeed) {
         layer.color = strtoul((l["color"] | "4488FF"), NULL, 16);
         layer.native_large = l["large"] | true;
         layer.native_spacing = l["spacing"] | 1;
+        layer.align = l["align"] | "left";
+        layer.align_width = l["align_width"] | 0;
     } else if (strcmp(typeStr, "native") == 0) {
         layer.type = LAYER_NATIVE;
         layer.label = l["label"] | "";
@@ -115,6 +117,8 @@ static Layer parseLayer(JsonObject l, uint32_t defaultScrollSpeed) {
         layer.color = strtoul((l["color"] | "FFFFFF"), NULL, 16);
         layer.native_large = l["large"] | false;
         layer.native_spacing = l["spacing"] | 1;
+        layer.align = l["align"] | "left";
+        layer.align_width = l["align_width"] | 0;
     } else if (strcmp(typeStr, "pixels") == 0) {
         layer.type = LAYER_PIXELS;
         layer.pixels_pattern = l["pattern"] | "";
@@ -196,6 +200,12 @@ bool ConfigManager::fetchConfig(const String& url, Config& cfg) {
 
     // Icons
     JsonObject icons = doc["icons"];
+    parseIcons(icons, cfg.icons);
+
+    return true;
+}
+
+void ConfigManager::parseIcons(JsonObject icons, std::map<String, Icon>& out) {
     for (JsonPair kv : icons) {
         Icon icon;
         JsonObject obj = kv.value();
@@ -215,10 +225,8 @@ bool ConfigManager::fetchConfig(const String& url, Config& cfg) {
         if (obj["remap_range"].is<JsonObject>()) {
             icon.remap_range = parseColorRange(obj["remap_range"]);
         }
-        cfg.icons[String(kv.key().c_str())] = icon;
+        out[String(kv.key().c_str())] = icon;
     }
-
-    return true;
 }
 
 bool ConfigManager::fetchData(const String& url, JsonDocument& doc) {

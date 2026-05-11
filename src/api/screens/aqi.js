@@ -49,12 +49,39 @@ export const screen = (config) => {
     data_url: `${config.BASE}/data/aqi`,
     layers: [
       // Full-width EPA color gradient bar across bottom rows
-      { type: 'gradient', x: 0, y: 5, width: 32, height: 3, direction: 'horizontal',
-        colors: { min: 0, max: 1, stops: [[0,'00CC44'],[0.17,'FFCC00'],[0.33,'FF8800'],[0.5,'FF0000'],[0.67,'880088'],[1,'880044']] } },
+      {
+        type: 'gradient',
+        x: 0,
+        y: 5,
+        width: 32,
+        height: 3,
+        direction: 'horizontal',
+        colors: {
+          min: 0,
+          max: 1,
+          stops: [
+            [0, '00CC44'],
+            [0.17, 'FFCC00'],
+            [0.33, 'FF8800'],
+            [0.5, 'FF0000'],
+            [0.67, '880088'],
+            [1, '880044'],
+          ],
+        },
+      },
       // White indicator line at current AQI position
       { type: 'pixels', pattern: 'vline', x: indicatorX, y: 5, color: 'FFFFFF' },
       // AQI value + label (centered)
-      { type: 'native', label: 'AQI {aqi}', x: 7, y: 0, color: textColor, large: false, spacing: 1 },
+      {
+        type: 'native',
+        label: 'AQI {aqi}',
+        x: 0,
+        y: 0,
+        color: textColor,
+        large: false,
+        spacing: 1,
+        align: 'center',
+      },
     ],
   };
 };
@@ -63,6 +90,9 @@ export const routes = (app, config) => {
   const API_KEY = process.env.OWM_API_KEY;
   const CITY = process.env.OWM_CITY || 'New York';
 
+  /**
+   *
+   */
   async function fetchAQI() {
     if (!API_KEY) return;
     try {
@@ -87,14 +117,28 @@ export const routes = (app, config) => {
     }
   }
 
+  /**
+   *
+   */
   function pm25ToAqi(pm25) {
-    const bp = [[0,12,0,50],[12.1,35.4,51,100],[35.5,55.4,101,150],[55.5,150.4,151,200],[150.5,250.4,201,300],[250.5,500,301,500]];
+    const bp = [
+      [0, 12, 0, 50],
+      [12.1, 35.4, 51, 100],
+      [35.5, 55.4, 101, 150],
+      [55.5, 150.4, 151, 200],
+      [150.5, 250.4, 201, 300],
+      [250.5, 500, 301, 500],
+    ];
     for (const [cLow, cHigh, iLow, iHigh] of bp) {
-      if (pm25 <= cHigh) return Math.round((iHigh - iLow) / (cHigh - cLow) * (pm25 - cLow) + iLow);
+      if (pm25 <= cHigh)
+        return Math.round(((iHigh - iLow) / (cHigh - cLow)) * (pm25 - cLow) + iLow);
     }
     return 500;
   }
 
+  /**
+   *
+   */
   function aqiCategory(aqi) {
     if (aqi <= 50) return 'Good';
     if (aqi <= 100) return 'Moderate';

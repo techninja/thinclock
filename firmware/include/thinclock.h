@@ -126,6 +126,8 @@ struct Layer {
     // LAYER_NATIVE
     bool native_large;   // true = 5x7, false = 3x5
     uint8_t native_spacing; // px between chars
+    String align;        // "left" (default), "center", "right"
+    uint8_t align_width; // area width for centering (0 = to screen edge)
 
     // LAYER_PIXELS
     String pixels_pattern; // "week_dots", "bar", etc.

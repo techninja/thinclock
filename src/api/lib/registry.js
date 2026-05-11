@@ -1,20 +1,28 @@
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
+import { isScheduleActive, resolveSchedule } from './schedules.js';
 
 export default class ScreenRegistry {
   constructor(options = {}) {
     this.modules = [];
     this.mode = options.mode || process.env.SCREEN_MODE || 'auto';
     this.allowlist = (options.allowlist || process.env.SCREEN_ALLOWLIST || '')
-      .split(',').map(s => s.trim()).filter(Boolean);
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
     this.blocklist = (options.blocklist || process.env.SCREEN_BLOCKLIST || '')
-      .split(',').map(s => s.trim()).filter(Boolean);
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
     this.maxScreens = parseInt(options.maxScreens || process.env.MAX_SCREENS || '8');
   }
 
   async loadDir(dir) {
-    const files = fs.readdirSync(dir).filter(f => f.endsWith('.js')).sort();
+    const files = fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith('.js'))
+      .sort();
     for (const file of files) {
       try {
         const mod = await import(pathToFileURL(path.join(dir, file)).href);
@@ -33,36 +41,16 @@ export default class ScreenRegistry {
     }
   }
 
-  passesSchedule(mod) {
-    if (!mod.schedule) return true;
-    const now = new Date();
-    const s = mod.schedule;
-    if (s.months && s.months.length > 0) {
-      if (!s.months.includes(now.getMonth() + 1)) return false;
-    }
-    if (s.hours && s.hours.length > 0) {
-      if (!s.hours.includes(now.getHours())) return false;
-    }
-    if (s.days && s.days.length > 0) {
-      if (!s.days.includes(now.getDay())) return false;
-    }
-    if (s.dateRange) {
-      const mmdd = (now.getMonth() + 1) * 100 + now.getDate();
-      if (mmdd < s.dateRange[0] || mmdd > s.dateRange[1]) return false;
-    }
-    return true;
-  }
-
   getActiveModules() {
     return this.modules
-      .filter(mod => {
+      .filter((mod) => {
         if (!mod.enabled) return false;
         if (this.blocklist.includes(mod._id)) return false;
         if (this.mode === 'manual' && this.allowlist.length > 0) {
           if (!this.allowlist.includes(mod._id)) return false;
         }
         if (this.mode === 'auto') {
-          if (!this.passesSchedule(mod)) return false;
+          if (!isScheduleActive(mod.schedule)) return false;
         }
         return true;
       })
@@ -91,7 +79,7 @@ export default class ScreenRegistry {
   }
 
   setEnabled(id, enabled) {
-    const mod = this.modules.find(m => m._id === id || m._file === id);
+    const mod = this.modules.find((m) => m._id === id || m._file === id);
     if (mod) mod.enabled = enabled;
   }
 
@@ -105,11 +93,16 @@ export default class ScreenRegistry {
 
   list() {
     const active = this.getActiveModules();
-    const activeIds = active.map(m => m._id);
-    return this.modules.map(m => ({
-      id: m._id, file: m._file, name: m.name || m._file,
-      enabled: m.enabled, active: activeIds.includes(m._id),
-      priority: m.priority, tags: m.tags, schedule: m.schedule,
+    const activeIds = active.map((m) => m._id);
+    return this.modules.map((m) => ({
+      id: m._id,
+      file: m._file,
+      name: m.name || m._file,
+      enabled: m.enabled,
+      active: activeIds.includes(m._id),
+      priority: m.priority,
+      tags: m.tags,
+      schedule: m.schedule,
       contextAction: m.contextAction,
     }));
   }

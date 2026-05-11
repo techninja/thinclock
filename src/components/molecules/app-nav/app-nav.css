@@ -1,0 +1,30 @@
+app-nav {
+  display: block;
+  margin-bottom: var(--space-lg);
+
+  & .app-nav {
+    display: flex;
+    gap: var(--space-sm);
+    padding: var(--space-sm);
+    background: var(--color-surface);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border);
+  }
+
+  & .nav-link {
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-sm);
+    text-decoration: none;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--color-text-muted);
+    transition:
+      background 0.15s,
+      color 0.15s;
+
+    &:hover {
+      background: var(--color-bg);
+      color: var(--color-text);
+    }
+  }
+}

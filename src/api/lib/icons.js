@@ -5,8 +5,15 @@
  * Additional colors can be passed as a colorMap object.
  */
 export function makeIcon(rows, r, g, b, colorMap = {}) {
-  const primary = [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
-  const defaults = { '#': primary, W: 'FFFFFF', T: '664400', Y: 'FFCC00', B: '000000', '.': '000000' };
+  const primary = [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
+  const defaults = {
+    '#': primary,
+    W: 'FFFFFF',
+    T: '664400',
+    Y: 'FFCC00',
+    B: '000000',
+    '.': '000000',
+  };
   const map = { ...defaults, ...colorMap };
 
   let hex = '';

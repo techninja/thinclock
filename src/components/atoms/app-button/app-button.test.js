@@ -1,5 +1,4 @@
 import { fixture, expect, oneEvent } from '@open-wc/testing';
-import { html } from 'hybrids';
 import '../app-button/app-button.js';
 
 describe('app-button', () => {

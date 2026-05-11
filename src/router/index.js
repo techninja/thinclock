@@ -1,5 +1,5 @@
 /**
- * App router shell — manages view stack and realtime sync.
+ * App router shell — manages view stack.
  * @module router
  */
 
@@ -10,7 +10,7 @@ export default define({
   tag: 'app-router',
   stack: router(HomeView, { url: '/' }),
   render: {
-    value: ({ stack }) => html`<div class="app-router">${stack}</div>`,
+    value: ({ stack }) => html` <div class="app-shell">${stack}</div> `,
     shadow: false,
   },
 });

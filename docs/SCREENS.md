@@ -68,34 +68,44 @@ exports.alerts = [
 ## Layer Types
 
 ### icon
+
 ```json
 { "type": "icon", "name": "icon_name", "x": 0, "y": 0 }
 ```
 
 ### text
+
 ```json
 { "type": "text", "label": "{value} units", "x": 0, "y": 0,
   "color": "FFFFFF", "scroll": "auto", "scroll_speed": 50, "fade_edge": 2 }
 ```
+
 Scroll modes: `none`, `auto`, `bounce`, `left`
 
 ### native
+
 Pixel-perfect digits and letters (3×5 or 5×7 font).
+
 ```json
 { "type": "native", "label": "{temp}F", "x": 0, "y": 0,
   "color": "FF8800", "large": false, "spacing": 1 }
 ```
+
 Supports: 0-9, A-Z, a-z, `:`, `.`, `!`, `-`, `%`, `F`/`C` (degree symbol)
 
 ### clock
+
 Native time or timer display.
+
 ```json
 { "type": "clock", "format": "12h", "x": 0, "y": 0,
   "color": "4488FF", "large": false, "spacing": 1 }
 ```
+
 Formats: `"12h"`, `"24h"`, `"timer"` (device countdown)
 
 ### particles
+
 ```json
 { "type": "particles", "gravity": 10, "edge": "die", "blend": "add", "opacity": 128,
   "colors": { "min": 0, "max": 1, "stops": [[0,"FFFFFF"],[1,"000000"]] },
@@ -105,32 +115,39 @@ Formats: `"12h"`, `"24h"`, `"timer"` (device countdown)
   ],
   "mask": "################################......" }
 ```
+
 - `edge`: `"die"`, `"bounce"`, `"wrap"`
 - `x/y: -1` = random position
 - `rocket: true` = bursts into ring at apex
 - `mask`: 32×8 chars, `#` = solid boundary
 
 ### gauge
+
 ```json
 { "type": "gauge", "style": "vbar", "x": 0, "y": 0, "width": 8, "height": 8,
   "value_key": "temperature",
   "range": { "min": 0, "max": 100, "stops": [[0,"0000FF"],[1,"FF0000"]] } }
 ```
+
 Styles: `"vbar"`, `"hbar"`, `"dot"`
 
 ### gradient
+
 ```json
 { "type": "gradient", "x": 0, "y": 0, "width": 32, "height": 8,
   "direction": "diagonal", "opacity": 180,
   "colors": { "min": 0, "max": 1, "stops": [[0,"FF0000"],[0.5,"000000"],[1,"0000FF"]] } }
 ```
+
 Directions: `"horizontal"`, `"vertical"`, `"diagonal"`
 
 ### pixels
+
 ```json
 { "type": "pixels", "pattern": "dots", "x": 0, "y": 7, "color": "FFFFFF",
   "points": [[0,0],[1,0],[2,0],[4,0],[5,0]] }
 ```
+
 Patterns: `"week_dots"`, `"vline"`, `"dots"` (arbitrary points)
 
 ## Universal Layer Properties

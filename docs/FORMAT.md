@@ -65,6 +65,7 @@ Each screen is an ordered array of layers with a duration and optional data sour
 See [SCREENS.md](SCREENS.md) for complete layer type documentation.
 
 Every layer supports:
+
 ```json
 {
   "type": "...",
@@ -94,12 +95,14 @@ Named icon definitions referenced by layers.
 ```
 
 ### Icon Data Format
+
 - RGB888 hex string, row-major: `"FF0000FF000000FF00..."` (3 bytes per pixel)
 - `000000` = transparent (black)
 - Multiple strings in `data` array = animation frames
 - `fps` > 0 enables frame cycling
 
 ### Color Remapping
+
 Set `remap_key` to a hex color present in the icon. At render time, all pixels matching that color are replaced with a color interpolated from `remap_range` based on the value of `remap_value_key` from the screen's data.
 
 ## Color Range Format
@@ -118,6 +121,7 @@ Each stop is `[position (0-1), "RRGGBB"]`. Colors interpolate linearly between s
 ## Data Endpoints
 
 Screen `data_url` should return flat JSON:
+
 ```json
 {"temperature": 72, "humidity": 45, "status": "OK"}
 ```
@@ -125,6 +129,7 @@ Screen `data_url` should return flat JSON:
 Keys match `{placeholder}` tokens in text/native layer labels.
 
 ### Special URLs
+
 - `self://sensors` — device's onboard temp/humidity/light (no network)
 - `self://ping` — device HTTP ping to 1.1.1.1 (latency + RSSI)
 

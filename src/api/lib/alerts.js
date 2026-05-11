@@ -63,8 +63,10 @@ export default class AlertEngine {
     const text = `${timestamp}: ${alert.message}`;
 
     const data = JSON.stringify({
-      text, color: alert.color || 'FFAA00',
-      beep: alert.beep || 'single', icon: alert.icon || '',
+      text,
+      color: alert.color || 'FFAA00',
+      beep: alert.beep || 'single',
+      icon: alert.icon || '',
     });
 
     try {

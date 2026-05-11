@@ -57,4 +57,3 @@ export default class HomeAssistantAdapter {
     console.log('  [ha] WebSocket connection not yet implemented');
   }
 }
-

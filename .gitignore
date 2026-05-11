@@ -9,3 +9,4 @@ src/vendor/
 src/icons.json
 data/db.json
 .env.local
+data/preview-cache/

@@ -7,3 +7,10 @@
 @import '../components/atoms/app-badge/app-badge.css';
 @import '../components/atoms/app-icon/app-icon.css';
 @import '../components/atoms/theme-toggle/theme-toggle.css';
+
+/* Molecules */
+@import '../components/molecules/app-nav/app-nav.css';
+
+/* Atoms (additional) */
+@import '../components/atoms/preview-canvas/preview-canvas.css';
+@import '../components/atoms/live-preview/live-preview.css';

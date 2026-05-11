@@ -41,6 +41,7 @@ The `screen-id` must match your module's filename (without `.js`).
 ## Condition Patterns
 
 ### Threshold crossing
+
 ```js
 condition: (history) => {
   if (history.length < 2) return false;
@@ -51,6 +52,7 @@ condition: (history) => {
 ```
 
 ### Sustained condition (N consecutive readings)
+
 ```js
 condition: (history) => {
   if (history.length < 5) return false;
@@ -59,6 +61,7 @@ condition: (history) => {
 ```
 
 ### State change
+
 ```js
 condition: (history) => {
   if (history.length < 2) return false;
@@ -69,6 +72,7 @@ condition: (history) => {
 ```
 
 ### Time-based (hasn't updated in X minutes)
+
 ```js
 condition: (history) => {
   if (history.length === 0) return false;
@@ -105,6 +109,7 @@ curl -X POST http://server:3232/test/alert \
 ## Server Polling
 
 The server polls every 15 seconds:
+
 - HTTP ping to 1.1.1.1 (measures internet latency)
 - Device `/sensors` endpoint (if DEVICE_IP is set)
 
