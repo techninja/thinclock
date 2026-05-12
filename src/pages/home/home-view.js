@@ -10,6 +10,7 @@ import '#atoms/live-preview/index.js';
 import RotationView from '#pages/rotation/rotation-view.js';
 import SettingsView from '#pages/settings/settings-view.js';
 import NotifyView from '#pages/notify/notify-view.js';
+import EditorView from '#pages/editor/editor-view.js';
 
 /**
  *
@@ -40,7 +41,7 @@ function handleBeep(host) {
 
 export default define({
   tag: 'home-view',
-  [router.connect]: { url: '/', stack: [RotationView, SettingsView, NotifyView] },
+  [router.connect]: { url: '/', stack: [RotationView, SettingsView, NotifyView, EditorView] },
   device: store(DeviceModel),
   _active: {
     value: [],

@@ -56,6 +56,7 @@ import AlertEngine from './api/lib/alerts.js';
 import HomeAssistantAdapter from './api/adapters/homeassistant.js';
 import { encodeGif } from './api/lib/gif.js';
 import { getSchedules, getSchedule, setSchedule, deleteSchedule } from './api/lib/schedules.js';
+import { listCustomScreens, getCustomScreen, saveCustomScreen, deleteCustomScreen } from './api/lib/custom-screens.js';
 
 console.log('\nLoading screens:');
 const registry = new ScreenRegistry();
@@ -196,6 +197,33 @@ app.put('/api/schedules/:name', (req, res) => {
 
 app.delete('/api/schedules/:name', (req, res) => {
   deleteSchedule(req.params.name);
+  res.json({ ok: true });
+});
+
+// --- Custom Screens API ---
+app.get('/api/custom-screens', (req, res) => {
+  res.json(listCustomScreens());
+});
+
+app.get('/api/custom-screens/:id', (req, res) => {
+  const screen = getCustomScreen(req.params.id);
+  if (!screen) return res.status(404).json({ error: 'not found' });
+  res.json(screen);
+});
+
+app.put('/api/custom-screens/:id', (req, res) => {
+  saveCustomScreen(req.params.id, req.body);
+  res.json({ ok: true });
+});
+
+app.post('/api/custom-screens', (req, res) => {
+  const id = req.body.id || `screen-${Date.now()}`;
+  saveCustomScreen(id, req.body);
+  res.json({ ok: true, id });
+});
+
+app.delete('/api/custom-screens/:id', (req, res) => {
+  deleteCustomScreen(req.params.id);
   res.json({ ok: true });
 });
 
@@ -558,7 +586,7 @@ app.post('/api/preview/regenerate', (req, res) => {
 });
 
 // --- SPA fallback — serve index.html for client-side routes ---
-app.get(/^\/(rotation|settings|notify)?$/, (req, res) => {
+app.get(/^\/(rotation|settings|notify|editor)?(\/.*)?$/, (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 

@@ -13,6 +13,7 @@ export default define({
       <nav class="app-nav">
         <a href="/" class="nav-link">Dashboard</a>
         <a href="/rotation" class="nav-link">Rotation</a>
+        <a href="/editor" class="nav-link">Editor</a>
         <a href="/settings" class="nav-link">Settings</a>
         <a href="/notify" class="nav-link">Notify</a>
       </nav>
