@@ -10,3 +10,5 @@ src/icons.json
 data/db.json
 .env.local
 data/preview-cache/
+.DS_Store
+.vscode/
