@@ -11,9 +11,19 @@ const MAX_PARTICLES = 48;
 export function initParticles(layer) {
   const particles = [];
   for (let i = 0; i < MAX_PARTICLES; i++) {
-    particles.push({ alive: false, x: 0, y: 0, vx: 0, vy: 0, age: 0, lifetime: 0, size: 1, color: [255,255,255] });
+    particles.push({
+      alive: false,
+      x: 0,
+      y: 0,
+      vx: 0,
+      vy: 0,
+      age: 0,
+      lifetime: 0,
+      size: 1,
+      color: [255, 255, 255],
+    });
   }
-  const state = { particles, emitters: (layer.emitters || []).map(e => ({ ...e, acc: 0 })) };
+  const state = { particles, emitters: (layer.emitters || []).map((e) => ({ ...e, acc: 0 })) };
   // Warmup
   const warmup = layer.warmup || 0;
   if (warmup > 0) {
@@ -23,6 +33,9 @@ export function initParticles(layer) {
   return state;
 }
 
+/**
+ *
+ */
 function randomColor(colors) {
   if (!colors?.stops?.length) return [255, 255, 255];
   const pos = Math.random();
@@ -30,6 +43,9 @@ function randomColor(colors) {
   return colorFromStops(colors.stops, val);
 }
 
+/**
+ *
+ */
 function spawn(state, em, colors) {
   for (const p of state.particles) {
     if (p.alive) continue;
@@ -63,16 +79,31 @@ export function tickParticles(state, layer, dt_ms = 16) {
   for (const p of state.particles) {
     if (!p.alive) continue;
     p.age += dt_ms;
-    if (p.age >= p.lifetime) { p.alive = false; continue; }
+    if (p.age >= p.lifetime) {
+      p.alive = false;
+      continue;
+    }
     p.vy += gravity * dt;
     p.x += p.vx * dt;
     p.y += p.vy * dt;
 
     if (edge === 'bounce') {
-      if (p.x < 0) { p.x = 0; p.vx *= -0.8; }
-      if (p.x >= WIDTH - 1) { p.x = WIDTH - 1.01; p.vx *= -0.8; }
-      if (p.y < 0) { p.y = 0; p.vy *= -0.8; }
-      if (p.y >= HEIGHT - 1) { p.y = HEIGHT - 1.01; p.vy *= -0.8; }
+      if (p.x < 0) {
+        p.x = 0;
+        p.vx *= -0.8;
+      }
+      if (p.x >= WIDTH - 1) {
+        p.x = WIDTH - 1.01;
+        p.vx *= -0.8;
+      }
+      if (p.y < 0) {
+        p.y = 0;
+        p.vy *= -0.8;
+      }
+      if (p.y >= HEIGHT - 1) {
+        p.y = HEIGHT - 1.01;
+        p.vy *= -0.8;
+      }
     } else if (edge === 'wrap') {
       if (p.x < 0) p.x += WIDTH;
       if (p.x >= WIDTH) p.x -= WIDTH;
@@ -102,7 +133,8 @@ export function renderParticles(buf, layer, _icons, state) {
       g = Math.round(g * fade);
       b = Math.round(b * fade);
     }
-    const px = Math.floor(p.x), py = Math.floor(p.y);
+    const px = Math.floor(p.x),
+      py = Math.floor(p.y);
     blend(buf, px, py, r, g, b);
     if (p.size >= 2) {
       blend(buf, px + 1, py, r, g, b);

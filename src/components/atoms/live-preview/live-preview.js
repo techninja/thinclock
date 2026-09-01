@@ -8,8 +8,8 @@ import { html, define } from 'hybrids';
 const WIDTH = 32;
 const HEIGHT = 8;
 const BYTES = WIDTH * HEIGHT * 3;
-const PX = 9;   // pixel size
-const GAP = 1;  // gap between pixels
+const PX = 9; // pixel size
+const GAP = 1; // gap between pixels
 const BEZEL = PX * 2 + GAP; // 2 "LED-sized" pixels as bezel
 const CANVAS_W = WIDTH * PX + (WIDTH - 1) * GAP + BEZEL * 2;
 const CANVAS_H = HEIGHT * PX + (HEIGHT - 1) * GAP + BEZEL * 2;
@@ -21,6 +21,9 @@ for (let i = 0; i < 256; i++) {
   gammaLUT[i] = Math.round(Math.pow(i / 255, 1 / GAMMA) * 255);
 }
 
+/**
+ *
+ */
 function paint(host, buf) {
   const canvas = host.querySelector('canvas');
   if (!canvas) return;
@@ -42,6 +45,9 @@ function paint(host, buf) {
   }
 }
 
+/**
+ *
+ */
 function connect(host) {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(`${proto}//${location.host}/ws/framebuffer`);
@@ -62,13 +68,13 @@ export default define({
     value: null,
     connect: (host) => {
       connect(host);
-      return () => { if (host._ws) host._ws.close(); };
+      return () => {
+        if (host._ws) host._ws.close();
+      };
     },
   },
   render: {
-    value: () => html`
-      <canvas width="${CANVAS_W}" height="${CANVAS_H}"></canvas>
-    `,
+    value: () => html` <canvas width="${CANVAS_W}" height="${CANVAS_H}"></canvas> `,
     shadow: false,
   },
 });

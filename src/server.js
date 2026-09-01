@@ -21,7 +21,7 @@ app.use((req, res, next) => {
 // Serve UI static files from src/ (index.html, components, pages, etc.)
 app.use(express.static(__dirname));
 
-const PORT = process.env.PORT || process.env.SERVER_PORT || 3000;
+const PORT = process.env.PORT || 3232;
 
 /**
  *
@@ -54,9 +54,13 @@ const config = {
 import ScreenRegistry from './api/lib/registry.js';
 import AlertEngine from './api/lib/alerts.js';
 import HomeAssistantAdapter from './api/adapters/homeassistant.js';
-import { encodeGif } from './api/lib/gif.js';
 import { getSchedules, getSchedule, setSchedule, deleteSchedule } from './api/lib/schedules.js';
-import { listCustomScreens, getCustomScreen, saveCustomScreen, deleteCustomScreen } from './api/lib/custom-screens.js';
+import {
+  listCustomScreens,
+  getCustomScreen,
+  saveCustomScreen,
+  deleteCustomScreen,
+} from './api/lib/custom-screens.js';
 
 console.log('\nLoading screens:');
 const registry = new ScreenRegistry();
@@ -306,7 +310,9 @@ const DEVICE_IP = process.env.DEVICE_IP;
 app.get('/api/device/framebuffer', async (req, res) => {
   if (!DEVICE_IP) return res.status(503).end();
   try {
-    const resp = await fetch(`http://${DEVICE_IP}/framebuffer`, { signal: AbortSignal.timeout(3000) });
+    const resp = await fetch(`http://${DEVICE_IP}/framebuffer`, {
+      signal: AbortSignal.timeout(3000),
+    });
     const buf = Buffer.from(await resp.arrayBuffer());
     res.set('Content-Type', 'application/octet-stream');
     res.set('Cache-Control', 'no-store');
@@ -321,10 +327,9 @@ app.get('/api/device/gif', async (req, res) => {
   if (!DEVICE_IP) return res.status(503).end();
   const { screen = 0, seconds = 2 } = req.query;
   try {
-    const resp = await fetch(
-      `http://${DEVICE_IP}/gif?screen=${screen}&seconds=${seconds}`,
-      { signal: AbortSignal.timeout(30000) }
-    );
+    const resp = await fetch(`http://${DEVICE_IP}/gif?screen=${screen}&seconds=${seconds}`, {
+      signal: AbortSignal.timeout(30000),
+    });
     res.set('Content-Type', 'image/gif');
     res.set('Cache-Control', 'public, max-age=60');
     const buf = Buffer.from(await resp.arrayBuffer());
@@ -339,10 +344,9 @@ app.get('/api/device/preview', async (req, res) => {
   if (!DEVICE_IP) return res.status(503).end();
   const { screen = 0, frames = 30 } = req.query;
   try {
-    const resp = await fetch(
-      `http://${DEVICE_IP}/preview?screen=${screen}&frames=${frames}`,
-      { signal: AbortSignal.timeout(15000) }
-    );
+    const resp = await fetch(`http://${DEVICE_IP}/preview?screen=${screen}&frames=${frames}`, {
+      signal: AbortSignal.timeout(15000),
+    });
     res.set('Content-Type', 'application/octet-stream');
     res.set('X-Frames', resp.headers.get('X-Frames') || frames);
     res.set('X-Frame-Ms', resp.headers.get('X-Frame-Ms') || '20');
@@ -377,7 +381,9 @@ app.post('/api/device/render', async (req, res) => {
 app.get('/api/device/:endpoint', async (req, res) => {
   if (!DEVICE_IP) return res.json({});
   try {
-    const resp = await fetch(`http://${DEVICE_IP}/${req.params.endpoint}`, { signal: AbortSignal.timeout(3000) });
+    const resp = await fetch(`http://${DEVICE_IP}/${req.params.endpoint}`, {
+      signal: AbortSignal.timeout(3000),
+    });
     const data = await resp.json();
     res.json(data);
   } catch (e) {
@@ -408,7 +414,7 @@ const wssDevice = new WebSocketServer({ noServer: true });
 
 // Device WS connection state
 let deviceWs = null;
-let renderQueue = [];
+const renderQueue = [];
 let currentJob = null;
 let jobFrames = [];
 
@@ -449,6 +455,9 @@ wssDevice.on('connection', (ws) => {
   });
 });
 
+/**
+ *
+ */
 function finishJob() {
   if (!currentJob) return;
   currentJob.resolve(jobFrames);
@@ -457,6 +466,9 @@ function finishJob() {
   processQueue();
 }
 
+/**
+ *
+ */
 function failJob(reason) {
   if (!currentJob) return;
   currentJob.reject(new Error(reason));
@@ -465,6 +477,9 @@ function failJob(reason) {
   processQueue();
 }
 
+/**
+ *
+ */
 function processQueue() {
   if (currentJob || renderQueue.length === 0 || !deviceWs) return;
   currentJob = renderQueue.shift();
@@ -482,8 +497,14 @@ function queueRender(command) {
     job.timeout = setTimeout(() => failJob('timeout'), 30000);
     const origResolve = resolve;
     const origReject = reject;
-    job.resolve = (frames) => { clearTimeout(job.timeout); origResolve(frames); };
-    job.reject = (err) => { clearTimeout(job.timeout); origReject(err); };
+    job.resolve = (frames) => {
+      clearTimeout(job.timeout);
+      origResolve(frames);
+    };
+    job.reject = (err) => {
+      clearTimeout(job.timeout);
+      origReject(err);
+    };
     renderQueue.push(job);
     processQueue();
   });
@@ -511,9 +532,12 @@ fs.mkdirSync(CACHE_DIR, { recursive: true });
 let previewGenerating = false;
 const previewQueue = [];
 
+/**
+ *
+ */
 async function generatePreview(screenId) {
   if (!DEVICE_IP) return null;
-  const mod = registry.modules.find(m => m._id === screenId);
+  const mod = registry.modules.find((m) => m._id === screenId);
   if (!mod) return null;
   const { icons } = registry.build(app, config);
   const screen = typeof mod.screen === 'function' ? mod.screen(config) : mod.screen;
@@ -528,14 +552,27 @@ async function generatePreview(screenId) {
     const resp = await fetch(`http://${DEVICE_IP}/gif`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ layers: screen.layers, data_url: screen.data_url || '', icons: usedIcons, seconds: 1, scale: 5, gap: 1, gamma: 18 }),
+      body: JSON.stringify({
+        layers: screen.layers,
+        data_url: screen.data_url || '',
+        icons: usedIcons,
+        seconds: 1,
+        scale: 5,
+        gap: 1,
+        gamma: 18,
+      }),
       signal: AbortSignal.timeout(30000),
     });
     if (!resp.ok) return null;
     return Buffer.from(await resp.arrayBuffer());
-  } catch (e) { return null; }
+  } catch (e) {
+    return null;
+  }
 }
 
+/**
+ *
+ */
 async function processPreviewQueue() {
   if (previewGenerating || previewQueue.length === 0) return;
   previewGenerating = true;
@@ -545,11 +582,14 @@ async function processPreviewQueue() {
   if (buf && buf.length > 10) {
     fs.writeFileSync(path.join(CACHE_DIR, `${screenId}.gif`), buf);
   }
-  await new Promise(r => setTimeout(r, 500));
+  await new Promise((r) => setTimeout(r, 500));
   previewGenerating = false;
   processPreviewQueue();
 }
 
+/**
+ *
+ */
 function queueAllPreviews() {
   for (const mod of registry.modules) {
     const cached = path.join(CACHE_DIR, `${mod._id}.gif`);

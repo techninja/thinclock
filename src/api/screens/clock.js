@@ -52,7 +52,17 @@ export const screen = (config) => ({
       },
     },
     { type: 'icon', name: 'calendar', x: 0, y: 0 },
-    { type: 'native', label: '{day}', x: 1, y: 2, color: '000000', large: false, spacing: 1, align: 'center', align_width: 7 },
+    {
+      type: 'native',
+      label: '{day}',
+      x: 1,
+      y: 2,
+      color: '000000',
+      large: false,
+      spacing: 1,
+      align: 'center',
+      align_width: 7,
+    },
     {
       type: 'clock',
       format: config.time_format,

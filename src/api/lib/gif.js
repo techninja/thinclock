@@ -4,7 +4,8 @@
  * @module api/lib/gif
  */
 
-const WIDTH = 32, HEIGHT = 8;
+const WIDTH = 32,
+  HEIGHT = 8;
 
 // Fixed 6×6×6 palette
 const PALETTE = Buffer.alloc(768);
@@ -18,9 +19,14 @@ for (let r = 0; r < 6; r++)
     }
 for (let i = 216; i < 256; i++) {
   const v = (i - 216) * 6 + 3;
-  PALETTE[i * 3] = v; PALETTE[i * 3 + 1] = v; PALETTE[i * 3 + 2] = v;
+  PALETTE[i * 3] = v;
+  PALETTE[i * 3 + 1] = v;
+  PALETTE[i * 3 + 2] = v;
 }
 
+/**
+ *
+ */
 function buildGammaLUT(gamma) {
   const lut = new Uint8Array(256);
   for (let i = 0; i < 256; i++) {
@@ -29,6 +35,9 @@ function buildGammaLUT(gamma) {
   return lut;
 }
 
+/**
+ *
+ */
 function colorToIndex(r, g, b) {
   const ri = Math.min(5, Math.round(r / 51));
   const gi = Math.min(5, Math.round(g / 51));
@@ -36,6 +45,9 @@ function colorToIndex(r, g, b) {
   return ri * 36 + gi * 6 + bi;
 }
 
+/**
+ *
+ */
 function buildScaledFrame(rgb, scale, gap, gammaLUT) {
   const outW = WIDTH * scale + (WIDTH - 1) * gap;
   const outH = HEIGHT * scale + (HEIGHT - 1) * gap;
@@ -60,22 +72,37 @@ function buildScaledFrame(rgb, scale, gap, gammaLUT) {
   return indexed;
 }
 
+/**
+ *
+ */
 function writeLZW(pixels, out) {
   out.push(8); // min code size
-  const clearCode = 256, eoiCode = 257;
-  let bitBuf = 0, bitCount = 0;
+  const clearCode = 256,
+    eoiCode = 257;
+  let bitBuf = 0,
+    bitCount = 0;
   const blocks = [];
   let block = [];
 
+  /**
+   *
+   */
   function flush() {
     while (bitCount >= 8) {
-      block.push(bitBuf & 0xFF);
-      bitBuf >>= 8; bitCount -= 8;
-      if (block.length === 255) { blocks.push(block); block = []; }
+      block.push(bitBuf & 0xff);
+      bitBuf >>= 8;
+      bitCount -= 8;
+      if (block.length === 255) {
+        blocks.push(block);
+        block = [];
+      }
     }
   }
+  /**
+   *
+   */
   function emit(code) {
-    bitBuf |= (code << bitCount);
+    bitBuf |= code << bitCount;
     bitCount += 9;
     flush();
   }
@@ -85,13 +112,19 @@ function writeLZW(pixels, out) {
   for (let i = 0; i < pixels.length; i++) {
     emit(pixels[i]);
     since++;
-    if (since >= 254) { emit(clearCode); since = 0; }
+    if (since >= 254) {
+      emit(clearCode);
+      since = 0;
+    }
   }
   emit(eoiCode);
-  if (bitCount > 0) block.push(bitBuf & 0xFF);
+  if (bitCount > 0) block.push(bitBuf & 0xff);
   if (block.length > 0) blocks.push(block);
 
-  for (const b of blocks) { out.push(b.length); out.push(...b); }
+  for (const b of blocks) {
+    out.push(b.length);
+    out.push(...b);
+  }
   out.push(0); // terminator
 }
 
@@ -113,12 +146,12 @@ export function encodeGif(frameBufs, scale = 5, gap = 1, gamma = 18) {
 
   // Header
   out.push(0x47, 0x49, 0x46, 0x38, 0x39, 0x61); // GIF89a
-  out.push(outW & 0xFF, (outW >> 8) & 0xFF);
-  out.push(outH & 0xFF, (outH >> 8) & 0xFF);
-  out.push(0xF7, 0, 0); // GCT 256 colors
+  out.push(outW & 0xff, (outW >> 8) & 0xff);
+  out.push(outH & 0xff, (outH >> 8) & 0xff);
+  out.push(0xf7, 0, 0); // GCT 256 colors
   for (let i = 0; i < 768; i++) out.push(PALETTE[i]);
   // NETSCAPE loop
-  out.push(0x21, 0xFF, 0x0B);
+  out.push(0x21, 0xff, 0x0b);
   out.push(...Buffer.from('NETSCAPE2.0'));
   out.push(0x03, 0x01, 0x00, 0x00, 0x00);
 
@@ -136,12 +169,12 @@ export function encodeGif(frameBufs, scale = 5, gap = 1, gamma = 18) {
 
     if (prevIndexed) {
       // Write previous frame with accumulated delay
-      out.push(0x21, 0xF9, 0x04, 0x04);
-      out.push(pendingDelay & 0xFF, (pendingDelay >> 8) & 0xFF);
+      out.push(0x21, 0xf9, 0x04, 0x04);
+      out.push(pendingDelay & 0xff, (pendingDelay >> 8) & 0xff);
       out.push(0x00, 0x00);
-      out.push(0x2C, 0, 0, 0, 0);
-      out.push(outW & 0xFF, (outW >> 8) & 0xFF);
-      out.push(outH & 0xFF, (outH >> 8) & 0xFF);
+      out.push(0x2c, 0, 0, 0, 0);
+      out.push(outW & 0xff, (outW >> 8) & 0xff);
+      out.push(outH & 0xff, (outH >> 8) & 0xff);
       out.push(0x00);
       writeLZW(prevIndexed, out);
       pendingDelay = delay;
@@ -152,16 +185,16 @@ export function encodeGif(frameBufs, scale = 5, gap = 1, gamma = 18) {
 
   // Write final frame
   if (prevIndexed) {
-    out.push(0x21, 0xF9, 0x04, 0x04);
-    out.push(pendingDelay & 0xFF, (pendingDelay >> 8) & 0xFF);
+    out.push(0x21, 0xf9, 0x04, 0x04);
+    out.push(pendingDelay & 0xff, (pendingDelay >> 8) & 0xff);
     out.push(0x00, 0x00);
-    out.push(0x2C, 0, 0, 0, 0);
-    out.push(outW & 0xFF, (outW >> 8) & 0xFF);
-    out.push(outH & 0xFF, (outH >> 8) & 0xFF);
+    out.push(0x2c, 0, 0, 0, 0);
+    out.push(outW & 0xff, (outW >> 8) & 0xff);
+    out.push(outH & 0xff, (outH >> 8) & 0xff);
     out.push(0x00);
     writeLZW(prevIndexed, out);
   }
 
-  out.push(0x3B); // trailer
+  out.push(0x3b); // trailer
   return Buffer.from(out);
 }

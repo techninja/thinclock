@@ -4,7 +4,10 @@
   align-items: center;
   justify-content: space-between;
   margin-bottom: var(--space-md);
-  & h1 { margin: 0; }
+
+  & h1 {
+    margin: 0;
+  }
 }
 
 .editor-actions {
@@ -42,8 +45,14 @@
   cursor: pointer;
   transition: background 0.1s;
 
-  &:hover { background: var(--color-bg); }
-  &.selected { border-color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 5%, transparent); }
+  &:hover {
+    background: var(--color-bg);
+  }
+
+  &.selected {
+    border-color: var(--color-primary);
+    background: color-mix(in srgb, var(--color-primary) 5%, transparent);
+  }
 
   & .layer-type {
     font-size: var(--text-sm);
@@ -51,6 +60,7 @@
     color: var(--color-primary);
     min-width: 5em;
   }
+
   & .layer-summary {
     flex: 1;
     font-size: var(--text-sm);
@@ -59,6 +69,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
   & .layer-controls {
     display: flex;
     gap: 2px;
@@ -72,14 +83,23 @@
   padding: 2px 6px;
   border-radius: var(--radius-sm);
   font-size: var(--text-sm);
-  &:hover { background: var(--color-border); }
+
+  &:hover {
+    background: var(--color-border);
+  }
 }
-.btn-danger-icon { color: var(--color-danger); }
+
+.btn-danger-icon {
+  color: var(--color-danger);
+}
 
 .add-layer {
   display: flex;
   gap: var(--space-sm);
-  & select { flex: 1; }
+
+  & select {
+    flex: 1;
+  }
 }
 
 .json-editor {

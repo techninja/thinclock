@@ -13,9 +13,10 @@ fs.mkdirSync(DIR, { recursive: true });
 
 /** List all custom screens (metadata only) */
 export function listCustomScreens() {
-  return fs.readdirSync(DIR)
-    .filter(f => f.endsWith('.json'))
-    .map(f => {
+  return fs
+    .readdirSync(DIR)
+    .filter((f) => f.endsWith('.json'))
+    .map((f) => {
       const data = JSON.parse(fs.readFileSync(path.join(DIR, f), 'utf8'));
       return { id: f.replace('.json', ''), name: data.name || f, layers: data.layers?.length || 0 };
     });

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
-import { isScheduleActive, resolveSchedule } from './schedules.js';
+import { isScheduleActive } from './schedules.js';
 
 export default class ScreenRegistry {
   constructor(options = {}) {

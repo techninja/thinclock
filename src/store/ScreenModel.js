@@ -26,13 +26,23 @@ const ScreenModel = {
   schedule: '',
   contextAction: '',
   [store.connect]: {
-    get: (id) => fetch('/api/screens/').then(r => r.json())
-      .then(list => list.find(s => s.id === id)),
-    list: () => fetch('/api/screens/').then(r => r.json())
-      .then(list => list.map(s => ({
-        ...s,
-        schedule: s.schedule ? (typeof s.schedule === 'string' ? s.schedule : JSON.stringify(s.schedule)) : '',
-      }))),
+    get: (id) =>
+      fetch('/api/screens/')
+        .then((r) => r.json())
+        .then((list) => list.find((s) => s.id === id)),
+    list: () =>
+      fetch('/api/screens/')
+        .then((r) => r.json())
+        .then((list) =>
+          list.map((s) => ({
+            ...s,
+            schedule: s.schedule
+              ? typeof s.schedule === 'string'
+                ? s.schedule
+                : JSON.stringify(s.schedule)
+              : '',
+          })),
+        ),
   },
 };
 

@@ -102,20 +102,13 @@ default values, so the model initializes cleanly:
 
 ```javascript
 [store.connect]: {
-  // ✅ GOOD — returns empty object, hybrids merges with defaults
   get: () => {
     const raw = localStorage.getItem('appState');
-    return raw ? JSON.parse(raw) : {};
+    return raw ? JSON.parse(raw) : {}; // ✅ — {} merges with defaults
+    // return raw ? JSON.parse(raw) : undefined; // ❌ — triggers error state
   },
-  // ❌ BAD — undefined triggers error state
-  // get: () => {
-  //   const raw = localStorage.getItem('appState');
-  //   return raw ? JSON.parse(raw) : undefined;
-  // },
 }
 ```
-
-This applies to all localStorage-backed singletons (`AppState`, `UserPrefs`).
 
 Consume in any component:
 
@@ -227,56 +220,28 @@ non-array during the pending phase.
 Always guard with `Array.isArray()` before calling array methods:
 
 ```javascript
-export default define({
-  tag: 'my-view',
-  items: {
-    value: [],
-    connect: (host, _key, invalidate) => {
-      fetchItems().then((list) => {
-        host.items = list;
-        invalidate();
-      });
-    },
-  },
-  render: ({ items }) => html`
-    // ❌ BAD — items may not be an array yet when render fires
-    ${items.filter((i) => i.active).map((i) => html`<span>${i.name}</span>`)} // ✅ GOOD — guard
-    before calling array methods
-    ${Array.isArray(items) && items.length > 0
-      ? items.filter((i) => i.active).map((i) => html`<span>${i.name}</span>`)
-      : html``}
-  `,
-});
+// ❌ BAD — items may not be an array yet when render fires
+${items.filter((i) => i.active).map((i) => html`<span>${i.name}</span>`)}
+
+// ✅ GOOD — guard before calling array methods
+${Array.isArray(items) && items.length > 0
+  ? items.filter((i) => i.active).map((i) => html`<span>${i.name}</span>`)
+  : html``}
 ```
 
-This applies to any property with `value: []` and an async `connect`.
-The `connect` callback sets the value and calls `invalidate()`, but the
-first render happens before that resolves.
+The first render fires before `connect`'s async callback resolves.
 
 #### Async Init with Child Component Props
 
-When a parent loads data during `connect` and passes it to a child via
-template props, the child may never see the change. Hybrids' change
-detection requires observing old → new. If the prop is set before the
-child mounts, there's no "old" value to compare against.
+When a parent sets a child prop during `connect`, the child may never
+see the change (no old → new transition). Defer to after first render:
 
 ```javascript
-// ❌ BAD — resultCount set during connect, before child mounts
-_init: {
-  value: false,
-  connect: (host, _key, invalidate) => {
-    loadData(host).then(() => {
-      host.resultCount = 14;
-      invalidate(); // child mounts with 14, never sees a change
-    });
-  },
+// ❌ BAD — child mounts with 14, never sees a change
+connect: (host, _key, invalidate) => {
+  loadData(host).then(() => { host.resultCount = 14; invalidate(); });
 },
-```
 
-The fix: defer the prop update to after the first render frame so the
-child is mounted and can observe the transition:
-
-```javascript
 // ✅ GOOD — child mounts with default (0), then sees 0 → 14
 connect: (host, _key, invalidate) => {
   loadData(host).then(() => {
@@ -285,10 +250,6 @@ connect: (host, _key, invalidate) => {
   });
 },
 ```
-
-Pre-populate external caches during `loadData` so the child has data
-ready when the deferred update triggers. The 0 → 14 transition happens
-within a single frame — no flicker.
 
 ---
 
@@ -346,40 +307,69 @@ export default define({
 
 #### Router Property Cache: Same-Value Writes Are No-Ops
 
-The router caches component property values across navigations and page
-reloads. When a view reconnects, its properties are restored from cache
-**before** `connect` callbacks run.
-
-This means if a `connect` callback loads data asynchronously and then sets
-a property to the same value the cache already holds, hybrids sees no
-change and skips the re-render:
+The router restores cached property values on reconnect. If `connect`
+sets a property to the same value the cache holds, hybrids skips re-render.
+Reset to a sentinel first:
 
 ```javascript
-// ❌ BAD — if router cache already has resultCount=22,
-// setting it to 22 again is a no-op. No re-render happens.
-connect: (host, _key, invalidate) => {
-  loadFromDB(host.userId).then((data) => {
-    populateMemoryCache(data);     // side effect: fills an external object
-    host.resultCount = data.length; // may equal cached value → no re-render
-    invalidate();
-  });
-},
+// ❌ BAD — may equal cached value → no re-render
+host.resultCount = data.length;
 
-// ✅ GOOD — reset to a sentinel value first, then set the real value.
-// Hybrids sees 0 → 22, triggers re-render after data is loaded.
-connect: (host, _key, invalidate) => {
-  loadFromDB(host.userId).then((data) => {
-    populateMemoryCache(data);
-    host.resultCount = 0;           // force a change
-    host.resultCount = data.length; // now hybrids sees a real change
-    invalidate();
-  });
-},
+// ✅ GOOD — force a change so hybrids sees 0 → 22
+host.resultCount = 0;
+host.resultCount = data.length;
 ```
 
-This is especially important when render depends on external mutable state
-(e.g. an in-memory cache object) that the property change is meant to
-signal. Without the reset, the component renders with stale external state.
+Important when render depends on external mutable state that the property
+change is meant to signal.
+
+#### Router Cache Poisons Boolean Flags Across Reconnects
+
+When a routed view has a boolean property used as a fallback/error flag,
+the router cache can poison it across reconnects. If the flag is ever set
+to `true` (e.g. a failed fetch), the cached value persists. On the next
+navigation to that view, `connect` runs but the property is already `true`
+from cache — even though the default is `false`:
+
+```javascript
+// ❌ BAD — if fallback was ever true, it stays true on reconnect
+export default define({
+  tag: 'my-view',
+  data: {
+    value: undefined,
+    connect(host, _key, invalidate) {
+      loadData(host).then(() => invalidate());
+    },
+  },
+  fallback: false, // default is false, but cache may hold true
+  render: ({ data, fallback }) => {
+    if (fallback) return html`<p>Error</p>`; // stuck here forever
+    // ...
+  },
+});
+
+// ✅ GOOD — reset the flag in connect before the async load
+export default define({
+  tag: 'my-view',
+  data: {
+    value: undefined,
+    connect(host, _key, invalidate) {
+      host.fallback = false; // clear stale cache
+      loadData(host).then(() => invalidate());
+    },
+  },
+  fallback: false,
+  render: ({ data, fallback }) => {
+    if (fallback) return html`<p>Error</p>`;
+    // ...
+  },
+});
+```
+
+The general rule: any boolean flag that gates render output and is set
+by an async `connect` flow should be explicitly reset at the top of
+`connect`. This is especially common with fetch-or-fallback patterns
+where the fallback path sets the flag to `true` on network errors.
 
 #### `router.backUrl()` Serializes All Parent Properties
 

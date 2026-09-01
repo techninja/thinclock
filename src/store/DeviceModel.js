@@ -36,8 +36,12 @@ const DeviceModel = {
       const { ip } = await fetch('/api/device-ip').then((r) => r.json());
       if (!ip) return { ip: '' };
       const [info, sensors] = await Promise.all([
-        fetch('/api/device/info').then((r) => r.json()).catch(() => ({})),
-        fetch('/api/device/sensors').then((r) => r.json()).catch(() => ({})),
+        fetch('/api/device/info')
+          .then((r) => r.json())
+          .catch(() => ({})),
+        fetch('/api/device/sensors')
+          .then((r) => r.json())
+          .catch(() => ({})),
       ]);
       return {
         ip,

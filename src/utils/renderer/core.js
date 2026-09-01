@@ -56,7 +56,8 @@ export function colorFromStops(stops, val) {
     const [p1, c1] = stops[i + 1];
     if (val >= p0 && val <= p1) {
       const t = (val - p0) / (p1 - p0);
-      const a = parseColor(c0), b = parseColor(c1);
+      const a = parseColor(c0),
+        b = parseColor(c1);
       return [
         Math.round(a[0] + (b[0] - a[0]) * t),
         Math.round(a[1] + (b[1] - a[1]) * t),

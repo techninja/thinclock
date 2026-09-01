@@ -418,6 +418,58 @@ void handleTimer() {
 }
 
 // --- WiFi & Serial ---
+
+// Show scrolling text on the display (blocking, for status messages)
+void scrollText(const String& text, uint32_t color = 0x00AAFF) {
+    int16_t textW = display.nativeTextWidth(text, 1, false);
+    for (int16_t x = MATRIX_WIDTH; x > -textW; x--) {
+        display.clear();
+        display.drawNativeText(text, x, 1, color, 1, false);
+        display.show();
+        delay(80);
+    }
+}
+
+void startAPMode() {
+    Serial.println("[wifi] Starting AP: thinclock-setup");
+    display.clear();
+    display.drawNativeText("SETUP", 1, 1, 0xFF8800, 1, false);
+    display.show();
+
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP("thinclock-setup", "thinclock");
+    Serial.printf("[wifi] AP IP: %s\n", WiFi.softAPIP().toString().c_str());
+
+    // Serve setup page
+    httpServer.on("/", HTTP_GET, []() {
+        httpServer.send(200, "text/html; charset=utf-8",
+            "<html><body style='font-family:sans-serif;max-width:400px;margin:2em auto'>" \
+            "<h2>thinclock setup</h2>" \
+            "<form method='POST' action='/setup'>" \
+            "<label>WiFi SSID<br><input name='ssid' style='width:100%'></label><br><br>" \
+            "<label>WiFi Password<br><input name='pass' type='password' style='width:100%'></label><br><br>" \
+            "<label>Config URL<br><input name='config_url' style='width:100%' placeholder='http://192.168.x.x:3232/api/config'></label><br><br>" \
+            "<button type='submit' style='padding:8px 16px'>Save &amp; Reboot</button>" \
+            "</form></body></html>"
+        );
+    });
+    httpServer.on("/setup", HTTP_POST, []() {
+        String ssid = httpServer.arg("ssid");
+        String pass = httpServer.arg("pass");
+        String url  = httpServer.arg("config_url");
+        if (ssid.isEmpty()) { httpServer.send(400, "text/plain", "SSID required"); return; }
+        prefs.begin("thinclock", false);
+        prefs.putString("ssid", ssid);
+        prefs.putString("pass", pass);
+        if (!url.isEmpty()) prefs.putString("config_url", url);
+        prefs.end();
+        httpServer.send(200, "text/html; charset=utf-8", "<html><body><h2>Saved! Rebooting...</h2></body></html>");
+        delay(1000);
+        ESP.restart();
+    });
+    httpServer.begin();
+}
+
 void setupWiFi() {
     prefs.begin("thinclock", true);
     wifiSSID = prefs.getString("ssid", "");
@@ -426,21 +478,30 @@ void setupWiFi() {
     prefs.end();
 
     if (wifiSSID.isEmpty()) {
-        Serial.println("No WiFi. Send: {\"ssid\":\"...\",\"pass\":\"...\",\"config_url\":\"...\"}");
+        Serial.println("No WiFi credentials — starting AP mode");
+        startAPMode();
         return;
     }
     WiFi.begin(wifiSSID.c_str(), wifiPass.c_str());
     Serial.printf("Connecting to %s", wifiSSID.c_str());
+    display.clear();
+    display.drawNativeText("WIFI", 1, 1, 0x0044FF, 1, false);
+    display.show();
     uint32_t start = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) { delay(250); Serial.print("."); }
-    Serial.println(WiFi.status() == WL_CONNECTED ? " OK" : " FAIL");
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.printf("IP: %s\n", WiFi.localIP().toString().c_str());
-        configTzTime("UTC0", "pool.ntp.org");
-        httpServer.on("/sensors", handleSensors);
-        httpServer.on("/status", handleStatus);
-        httpServer.on("/notify", handleNotify);
-        httpServer.on("/timer", handleTimer);
+    while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) { delay(250); Serial.print("."); }
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println(" FAIL — starting AP mode");
+        startAPMode();
+        return;
+    }
+    Serial.printf(" OK\nIP: %s\n", WiFi.localIP().toString().c_str());
+    // Scroll IP on display so user can find the device
+    scrollText("IP " + WiFi.localIP().toString(), 0x00FF44);
+    configTzTime("UTC0", "pool.ntp.org");
+    httpServer.on("/sensors", handleSensors);
+    httpServer.on("/status", handleStatus);
+    httpServer.on("/notify", handleNotify);
+    httpServer.on("/timer", handleTimer);
         httpServer.on("/beep", HTTP_POST, []() {
             // POST /beep {"pattern":[[freq, duration, pause], ...]}
             // or shorthand: {"type":"single|double|triple|alarm"}
@@ -474,6 +535,40 @@ void setupWiFi() {
         });
 
         // Device info
+        httpServer.on("/", HTTP_GET, []() {
+            String ip = WiFi.localIP().toString();
+            String cfg = config.valid ? "<span style='color:#4c4'>&#x2714; connected</span>" : "<span style='color:#c44'>&#x2718; not connected</span>";
+            httpServer.send(200, "text/html; charset=utf-8",
+                "<html><head><meta name='viewport' content='width=device-width,initial-scale=1'>" \
+                "<style>body{font-family:sans-serif;max-width:420px;margin:2em auto;padding:0 1em}" \
+                "input{width:100%;box-sizing:border-box;padding:6px;margin-top:4px}" \
+                "button{padding:8px 16px;margin-top:8px;cursor:pointer}</style></head><body>" \
+                "<h2>&#x1F551; thinclock</h2>" \
+                "<p>IP: <b>" + ip + "</b> &nbsp; Config: " + cfg + "</p>" \
+                "<form method='POST' action='/setup'>" \
+                "<label>WiFi SSID<br><input name='ssid' value='" + wifiSSID + "'></label><br><br>" \
+                "<label>WiFi Password<br><input name='pass' type='password' placeholder='(unchanged)'></label><br><br>" \
+                "<label>Config URL<br><input name='config_url' value='" + configURL + "'></label><br>" \
+                "<button type='submit'>Save &amp; Reboot</button>" \
+                "</form>" \
+                "<hr><p style='font-size:0.85em'><a href='/info'>info</a> &middot; <a href='/sensors'>sensors</a> &middot; <a href='/status'>status</a></p>" \
+                "</body></html>"
+            );
+        });
+        httpServer.on("/setup", HTTP_POST, []() {
+            String ssid = httpServer.arg("ssid");
+            String pass = httpServer.arg("pass");
+            String url  = httpServer.arg("config_url");
+            if (ssid.isEmpty()) { httpServer.send(400, "text/plain", "SSID required"); return; }
+            prefs.begin("thinclock", false);
+            prefs.putString("ssid", ssid);
+            if (!pass.isEmpty()) prefs.putString("pass", pass);
+            prefs.putString("config_url", url);
+            prefs.end();
+            httpServer.send(200, "text/html; charset=utf-8", "<html><body><h2>Saved! Rebooting...</h2></body></html>");
+            delay(1000);
+            ESP.restart();
+        });
         httpServer.on("/info", HTTP_GET, []() {
             JsonDocument doc;
             doc["firmware"] = "thinclock";
@@ -819,7 +914,6 @@ void setupWiFi() {
             renderClient.begin(host, port);
             Serial.printf("[ws] Connecting to %s:%d\n", host.c_str(), port);
         }
-    }
 }
 
 void handleSerial() {
@@ -1233,11 +1327,15 @@ void loop() {
     if (now - lastButtonCheck > BUTTON_CHECK_MS) { checkButtons(); checkLDR(); lastButtonCheck = now; now = millis(); }
     if (now - lastSensorRead > SENSOR_READ_MS) { sensors.read(); lastSensorRead = now; }
 
-    // Config
+    // Config — with exponential backoff on failure
+    static uint32_t configBackoff = CONFIG_POLL_MS;
+    static bool lastFetchFailed = false;
     if (!configURL.isEmpty() && WiFi.status() == WL_CONNECTED) {
-        if (!config.valid || now - lastConfigFetch > CONFIG_POLL_MS) {
+        if (!config.valid || now - lastConfigFetch > configBackoff) {
             Config newCfg;
             if (configMgr.fetchConfig(configURL, newCfg)) {
+                configBackoff = CONFIG_POLL_MS; // reset on success
+                lastFetchFailed = false;
                 display.setBrightness(newCfg.brightness);
                 // Apply timezone
                 char tz[16];
@@ -1258,10 +1356,32 @@ void loop() {
                 }
             }
             lastConfigFetch = now;
+            if (!config.valid) {
+                // Back off: 30s → 60s → 120s → ... → 5min max
+                configBackoff = min((uint32_t)300000, configBackoff * 2);
+                lastFetchFailed = true;
+            }
         }
     }
 
-    if (!config.valid || config.screens.empty()) { showClock(); delay(500); return; }
+    if (!config.valid || config.screens.empty()) {
+        showClock();
+        // Middle button: scroll IP and config URL so user can find/fix the device
+        if (digitalRead(BUTTON_MID) == LOW) {
+            delay(50);
+            if (digitalRead(BUTTON_MID) == LOW) {
+                if (WiFi.status() == WL_CONNECTED) {
+                    scrollText("IP " + WiFi.localIP().toString(), 0x00FF44);
+                    if (!configURL.isEmpty()) scrollText(configURL, 0xFF8800);
+                } else {
+                    scrollText("NO WIFI", 0xFF0000);
+                    scrollText(wifiSSID, 0xFF4400);
+                }
+            }
+        }
+        delay(500);
+        return;
+    }
 
     // Fetch data
     Screen& scr = config.screens[currentScreen];
