@@ -19,7 +19,7 @@ RUN mkdir -p /data/preview-cache /data/custom-screens
 # Symlink data dir into app so server finds it at ./data/
 RUN ln -s /data ./data
 
-COPY homeassistant/addon/run.sh /run.sh
+COPY run.sh /run.sh
 RUN chmod +x /run.sh
 
 CMD ["/run.sh"]
