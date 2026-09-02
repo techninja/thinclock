@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <HTTPClient.h>
+#include <ESPmDNS.h>
 #include <time.h>
 #include <Preferences.h>
 #include "thinclock.h"
@@ -497,6 +498,13 @@ void setupWiFi() {
     Serial.printf(" OK\nIP: %s\n", WiFi.localIP().toString().c_str());
     // Scroll IP on display so user can find the device
     scrollText("IP " + WiFi.localIP().toString(), 0x00FF44);
+    // Advertise via mDNS so HA integration can auto-discover
+    if (MDNS.begin("thinclock")) {
+        MDNS.addService("_thinclock", "_tcp", 80);
+        MDNS.addServiceTxt("_thinclock", "_tcp", "version", "0.9.0");
+        MDNS.addServiceTxt("_thinclock", "_tcp", "ip", WiFi.localIP().toString());
+        Serial.println("[mdns] thinclock.local");
+    }
     configTzTime("UTC0", "pool.ntp.org");
     httpServer.on("/sensors", handleSensors);
     httpServer.on("/status", handleStatus);

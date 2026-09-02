@@ -2,16 +2,19 @@
   "config": {
     "step": {
       "user": {
-        "title": "Add ThinClock Device",
-        "description": "Enter the IP address of your ThinClock device.",
-        "data": {
-          "host": "IP Address",
-          "port": "Port"
-        }
+        "title": "Connect to ThinClock",
+        "data": { "url": "Server URL" },
+        "description": "Enter the URL of your thinclock server (e.g. http://192.168.1.x:3232)"
+      },
+      "zeroconf_confirm": {
+        "title": "ThinClock found",
+        "description": "Found ThinClock at {ip} (firmware {version}). Add it?"
       }
     },
-    "error": {
-      "cannot_connect": "Cannot connect to device. Check IP and ensure it's powered on."
+    "error": { "cannot_connect": "Cannot connect — check the URL and that the server is running" },
+    "abort": {
+      "already_configured": "This ThinClock is already configured",
+      "cannot_connect": "Cannot connect to device"
     }
   }
 }
