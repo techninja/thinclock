@@ -11,6 +11,10 @@
  */
 class GifEncoder {
 public:
+    GifEncoder() : _client(nullptr), _delay(0), _scale(1), _gap(0), _gamma(1.0f),
+                   _outW(0), _outH(0), _outPixels(0), _palette{}, _paletteSize(0),
+                   _indexed(nullptr), _prevIndexed(nullptr), _firstFrame(true),
+                   _pendingDelay(0), _gammaLUT{} {}
     /**
      * Begin encoding with LED-style options.
      * @param client WiFi client to stream to

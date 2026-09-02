@@ -11,10 +11,6 @@ import RotationView from '#pages/rotation/rotation-view.js';
 import SettingsView from '#pages/settings/settings-view.js';
 import NotifyView from '#pages/notify/notify-view.js';
 import EditorView from '#pages/editor/editor-view.js';
-
-/**
- *
- */
 function formatUptime(seconds) {
   if (!seconds) return '—';
   const h = Math.floor(seconds / 3600);
@@ -33,7 +29,7 @@ function loadActive(host) {
 }
 
 /** @param {HTMLElement} host */
-function handleBeep(host) {
+function handleBeep(_host) {
   import('#utils/device.js').then(({ devicePost }) => {
     devicePost('/beep', { pattern: 'default' });
   });

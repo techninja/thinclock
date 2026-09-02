@@ -29,7 +29,7 @@ enum ParticleBehavior { PB_DIE, PB_BOUNCE, PB_WRAP };
 enum LayerType {
     LAYER_ICON,
     LAYER_TEXT,
-    LAYER_NATIVE,     // pixel-perfect text (digits, colon, %, F/C)
+    LAYER_NATIVE,
     LAYER_PARTICLES,
     LAYER_GAUGE,
     LAYER_CLOCK,
@@ -40,24 +40,24 @@ enum LayerType {
 // --- Color ---
 
 struct ColorStop {
-    float pos;
-    uint8_t r, g, b;
+    float pos = 0;
+    uint8_t r = 0, g = 0, b = 0;
 };
 
 struct ColorRange {
-    float min_val;
-    float max_val;
+    float min_val = 0;
+    float max_val = 1;
     std::vector<ColorStop> stops;
 };
 
 // --- Icon ---
 
 struct Icon {
-    uint8_t width;
-    uint8_t height;
-    uint8_t fps;
+    uint8_t width = 0;
+    uint8_t height = 0;
+    uint8_t fps = 0;
     std::vector<std::vector<uint8_t>> frames;
-    uint32_t remap_key;
+    uint32_t remap_key = 0;
     String remap_value_key;
     ColorRange remap_range;
 };
@@ -65,40 +65,40 @@ struct Icon {
 // --- Particles ---
 
 struct ParticleEmitter {
-    float x, y;
-    float vx_min, vx_max;
-    float vy_min, vy_max;
-    float rate;
-    uint16_t lifetime_min, lifetime_max;
-    uint8_t size;
-    bool is_rocket;
-    float accumulator;
+    float x = 0, y = 0;
+    float vx_min = 0, vx_max = 0;
+    float vy_min = 0, vy_max = 0;
+    float rate = 0;
+    uint16_t lifetime_min = 0, lifetime_max = 0;
+    uint8_t size = 1;
+    bool is_rocket = false;
+    float accumulator = 0;
 };
 
 struct ParticleConfig {
     std::vector<ParticleEmitter> emitters;
-    float gravity;
-    ParticleBehavior edge;
+    float gravity = 0;
+    ParticleBehavior edge = PB_DIE;
     ColorRange colors;
     String mask;
-    uint16_t warmup;  // ms to pre-simulate on init (fills screen immediately)
-    bool active;
+    uint16_t warmup = 0;
+    bool active = false;
 };
 
 // --- Pixel pattern ---
 
 struct PixelDot {
-    int16_t x, y;
-    uint32_t color;
+    int16_t x = 0, y = 0;
+    uint32_t color = 0;
 };
 
 // --- Layer ---
 
 struct Layer {
-    LayerType type;
-    int16_t x, y;
-    uint8_t opacity;  // 0-255, applied to all pixels this layer draws
-    String blend;      // "normal" (default), "add" (additive - black=transparent)
+    LayerType type = LAYER_TEXT;
+    int16_t x = 0, y = 0;
+    uint8_t opacity = 255;
+    String blend;
 
     // LAYER_ICON
     String icon_name;
@@ -106,49 +106,49 @@ struct Layer {
     // LAYER_TEXT
     String label;
     String data_url;
-    uint32_t color;
-    ScrollMode scroll;
-    uint16_t scroll_speed;
-    uint8_t fade_edge;
+    uint32_t color = 0xFFFFFF;
+    ScrollMode scroll = SCROLL_AUTO;
+    uint16_t scroll_speed = 50;
+    uint8_t fade_edge = 0;
 
     // LAYER_PARTICLES
     ParticleConfig particles;
 
     // LAYER_GAUGE
-    GaugeStyle gauge;
-    uint8_t gauge_w, gauge_h;
+    GaugeStyle gauge = GAUGE_NONE;
+    uint8_t gauge_w = 0, gauge_h = 0;
     String value_key;
     ColorRange range;
 
     // LAYER_CLOCK
-    String clock_format; // "12h" or "24h"
+    String clock_format;
 
     // LAYER_NATIVE
-    bool native_large;   // true = 5x7, false = 3x5
-    uint8_t native_spacing; // px between chars
-    String align;        // "left" (default), "center", "right"
-    uint8_t align_width; // area width for centering (0 = to screen edge)
+    bool native_large = false;
+    uint8_t native_spacing = 1;
+    String align;
+    uint8_t align_width = 0;
 
     // LAYER_PIXELS
-    String pixels_pattern; // "week_dots", "bar", etc.
+    String pixels_pattern;
     String pixels_data_key;
-    uint32_t pixels_color;
-    uint32_t pixels_dim_color;
-    std::vector<std::pair<int8_t, int8_t>> pixels_points; // for "dots" pattern
+    uint32_t pixels_color = 0xFFFFFF;
+    uint32_t pixels_dim_color = 0x222222;
+    std::vector<std::pair<int8_t, int8_t>> pixels_points;
 
     // LAYER_GRADIENT
-    uint8_t grad_w, grad_h;       // size (0 = full screen)
-    String grad_direction;         // "horizontal", "vertical", "diagonal"
-    ColorRange grad_colors;        // color stops across the gradient
+    uint8_t grad_w = 0, grad_h = 0;
+    String grad_direction;
+    ColorRange grad_colors;
 
-    // Tweens (per-layer animation)
+    // Tweens
     struct Tween {
-        String prop;       // "x", "y", "opacity"
-        float from, to;
-        uint16_t duration; // ms
-        String easing;     // "linear", "sine", "ease_in", "ease_out", "ease_in_out"
-        String loop;       // "none", "repeat", "pingpong"
-        uint16_t delay;    // ms before starting
+        String prop;
+        float from = 0, to = 0;
+        uint16_t duration = 1000;
+        String easing;
+        String loop;
+        uint16_t delay = 0;
     };
     std::vector<Tween> tweens;
 };
@@ -157,7 +157,7 @@ struct Layer {
 
 struct Screen {
     std::vector<Layer> layers;
-    uint32_t duration;
+    uint32_t duration = 10000;
     String data_url;
 };
 
@@ -167,22 +167,22 @@ struct Screen {
 
 struct Notification {
     std::vector<Layer> layers;
-    uint32_t color;
-    String icon_name;   // optional icon to show left of text
-    uint8_t beep;
-    uint32_t alertInterval;
-    uint32_t lastBeep;
-    bool active;
+    uint32_t color = 0xFFAA00;
+    String icon_name;
+    uint8_t beep = 1;
+    uint32_t alertInterval = 30000;
+    uint32_t lastBeep = 0;
+    bool active = false;
 };
 
 // --- Timer ---
 
 struct Timer {
-    uint32_t endTime;    // millis() when timer expires
-    uint32_t duration;   // original duration in ms
-    uint32_t color;
-    bool active;
-    bool fired;          // has the completion beep fired
+    uint32_t endTime = 0;
+    uint32_t duration = 0;
+    uint32_t color = 0x00AAFF;
+    bool active = false;
+    bool fired = false;
 };
 
 // --- Config ---
@@ -194,11 +194,11 @@ struct Config {
     String temp_unit;
     std::vector<Screen> screens;
     std::map<String, Icon> icons;
-    uint8_t brightness;
-    int8_t timezone_offset;
-    uint32_t scroll_speed;
-    uint8_t transition_ms;
+    uint8_t brightness = 40;
+    int8_t timezone_offset = 0;
+    uint32_t scroll_speed = 50;
+    uint8_t transition_ms = 8;
     String buttons;
-    bool allow_beep;
-    bool valid;
+    bool allow_beep = true;
+    bool valid = false;
 };

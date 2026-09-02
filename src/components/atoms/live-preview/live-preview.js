@@ -20,10 +20,6 @@ const gammaLUT = new Uint8Array(256);
 for (let i = 0; i < 256; i++) {
   gammaLUT[i] = Math.round(Math.pow(i / 255, 1 / GAMMA) * 255);
 }
-
-/**
- *
- */
 function paint(host, buf) {
   const canvas = host.querySelector('canvas');
   if (!canvas) return;
@@ -44,10 +40,6 @@ function paint(host, buf) {
     }
   }
 }
-
-/**
- *
- */
 function connect(host) {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(`${proto}//${location.host}/ws/framebuffer`);

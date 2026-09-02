@@ -6,20 +6,12 @@
 import { html, define, store, router } from 'hybrids';
 import DeviceModel from '#store/DeviceModel.js';
 import '#molecules/app-nav/index.js';
-
-/**
- *
- */
-function handleReboot(host) {
+function handleReboot(_host) {
   if (!confirm('Reboot device?')) return;
   import('#utils/device.js').then(({ devicePost }) => {
     devicePost('/reboot', {}).catch(() => {});
   });
 }
-
-/**
- *
- */
 function formatUptime(seconds) {
   if (!seconds) return '—';
   const h = Math.floor(seconds / 3600);

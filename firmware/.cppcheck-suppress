@@ -1,0 +1,7 @@
+// cppcheck suppress file for thinclock firmware
+// ArduinoJson uses operator| for defaults — not a bitmask, suppress false positives
+badBitmaskCheck
+// Display methods operate on global render_buf via FastLED — cannot be static
+functionStatic:firmware/src/display.cpp
+// fetchData is a candidate but kept as instance method for future state
+functionStatic:firmware/src/config_manager.cpp

@@ -43,7 +43,9 @@ export default class AlertEngine {
       if (Date.now() - lastFired < cooldown) continue;
       try {
         if (alert.condition(history)) this.fire(alert);
-      } catch (e) {}
+      } catch {
+        /* condition eval error — skip */
+      }
     }
   }
 
@@ -74,9 +76,13 @@ export default class AlertEngine {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
       });
-      req.on('error', () => {});
+      req.on('error', () => {
+        /* fire-and-forget */
+      });
       req.write(data);
       req.end();
-    } catch (e) {}
+    } catch {
+      /* device unreachable — skip */
+    }
   }
 }

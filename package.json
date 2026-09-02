@@ -37,7 +37,7 @@
   },
   "devDependencies": {
     "@open-wc/testing": "^4.0.0",
-    "@techninja/clearstack": "^0.4.21",
+    "@techninja/clearstack": "^0.4.26",
     "@types/node": "^22.0.0",
     "@web/test-runner": "^1.0.0",
     "@web/test-runner-playwright": "^0.11.0",

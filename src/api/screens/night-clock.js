@@ -20,9 +20,6 @@ export const screen = (config) => {
   }
 
   // Interpolate colors based on progress
-  /**
-   *
-   */
   function lerpColor(c1, c2, t) {
     const r1 = parseInt(c1.slice(0, 2), 16),
       g1 = parseInt(c1.slice(2, 4), 16),

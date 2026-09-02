@@ -30,7 +30,7 @@ export const alerts = [
   },
 ];
 
-let aqiCache = { aqi: 42, category: 'Good', updated: 0 };
+const aqiCache = { aqi: 42, category: 'Good', updated: 0 };
 
 export const screen = (config) => {
   const aqi = aqiCache.aqi;
@@ -86,76 +86,5 @@ export const screen = (config) => {
   };
 };
 
-export const routes = (app, config) => {
-  const API_KEY = process.env.OWM_API_KEY;
-  const CITY = process.env.OWM_CITY || 'New York';
-
-  /**
-   *
-   */
-  async function fetchAQI() {
-    if (!API_KEY) return;
-    try {
-      const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(CITY)}&limit=1&appid=${API_KEY}`;
-      const geoResp = await fetch(geoUrl);
-      const geoData = await geoResp.json();
-      if (!geoData.length) return;
-
-      const { lat, lon } = geoData[0];
-      const aqiUrl = `https://api.openweathermap.org/data/2.5/air_pollution?lat=${lat}&lon=${lon}&appid=${API_KEY}`;
-      const resp = await fetch(aqiUrl);
-      const data = await resp.json();
-      if (data.list && data.list[0]) {
-        const pm25 = data.list[0].components.pm2_5;
-        const epaAqi = pm25ToAqi(pm25);
-        aqiCache = { aqi: epaAqi, category: aqiCategory(epaAqi), updated: Date.now() };
-        console.log(`[aqi] ${CITY}: AQI ${epaAqi} (${aqiCache.category})`);
-        if (config.pushAlert) config.pushAlert('aqi', aqiCache);
-      }
-    } catch (e) {
-      console.error('[aqi] fetch error:', e.message);
-    }
-  }
-
-  /**
-   *
-   */
-  function pm25ToAqi(pm25) {
-    const bp = [
-      [0, 12, 0, 50],
-      [12.1, 35.4, 51, 100],
-      [35.5, 55.4, 101, 150],
-      [55.5, 150.4, 151, 200],
-      [150.5, 250.4, 201, 300],
-      [250.5, 500, 301, 500],
-    ];
-    for (const [cLow, cHigh, iLow, iHigh] of bp) {
-      if (pm25 <= cHigh)
-        return Math.round(((iHigh - iLow) / (cHigh - cLow)) * (pm25 - cLow) + iLow);
-    }
-    return 500;
-  }
-
-  /**
-   *
-   */
-  function aqiCategory(aqi) {
-    if (aqi <= 50) return 'Good';
-    if (aqi <= 100) return 'Moderate';
-    if (aqi <= 150) return 'Unhealthy (SG)';
-    if (aqi <= 200) return 'Unhealthy';
-    if (aqi <= 300) return 'Very Unhealthy';
-    return 'Hazardous';
-  }
-
-  if (API_KEY) {
-    fetchAQI();
-    setInterval(fetchAQI, 30 * 60 * 1000);
-  } else {
-    console.log('  [aqi] No OWM_API_KEY set');
-  }
-
-  app.get('/data/aqi', (req, res) => {
-    res.json({ aqi: aqiCache.aqi, category: aqiCache.category });
-  });
-};
+import { registerAqiRoutes } from './aqi-routes.js';
+export const routes = (app, config) => registerAqiRoutes(app, config, aqiCache);

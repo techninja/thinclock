@@ -6,10 +6,6 @@
 import { html, define, store, router } from 'hybrids';
 import ScreenModel from '#store/ScreenModel.js';
 import '#molecules/app-nav/index.js';
-
-/**
- *
- */
 function toggleScreen(host, event) {
   const id = event.currentTarget.dataset.id;
   const enabled = event.currentTarget.dataset.enabled === 'true';
@@ -18,10 +14,6 @@ function toggleScreen(host, event) {
     store.clear([ScreenModel]),
   );
 }
-
-/**
- *
- */
 function scheduleLabel(schedule) {
   if (!schedule) return '';
   if (typeof schedule === 'string') return schedule;
@@ -54,10 +46,6 @@ async function loadPreviews(host) {
     }
   }
 }
-
-/**
- *
- */
 function renderItem(screen) {
   return html`
     <li class="screen-item ${screen.active ? 'active' : ''} ${!screen.enabled ? 'disabled' : ''}">

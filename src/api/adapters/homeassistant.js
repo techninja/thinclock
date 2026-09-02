@@ -24,7 +24,7 @@ export default class HomeAssistantAdapter {
     this._pending = new Map();
   }
 
-  setup(app, config) {
+  setup(app, _config) {
     if (!this.url || !this.token) {
       console.log('  [ha] Not configured (set HA_URL and HA_TOKEN)');
       return;

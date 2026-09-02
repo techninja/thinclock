@@ -5,10 +5,6 @@
 
 import { html, define, router } from 'hybrids';
 import '#molecules/app-nav/index.js';
-
-/**
- *
- */
 function sendNotify(host) {
   import('#utils/device.js').then(({ devicePost }) => {
     devicePost('/notify', {
@@ -24,10 +20,6 @@ function sendNotify(host) {
       });
   });
 }
-
-/**
- *
- */
 function startTimer(host) {
   const seconds = parseInt(host._timerMin) * 60;
   if (!seconds) return;
@@ -37,10 +29,6 @@ function startTimer(host) {
     });
   });
 }
-
-/**
- *
- */
 function testBeep(host) {
   import('#utils/device.js').then(({ devicePost }) => {
     devicePost('/beep', { pattern: host._pattern });

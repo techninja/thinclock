@@ -4,6 +4,7 @@
 #include <HTTPClient.h>
 #include <ESPmDNS.h>
 #include <time.h>
+#include <algorithm>
 #include <Preferences.h>
 #include "thinclock.h"
 #include "display.h"
@@ -106,7 +107,7 @@ void beepTriple() {
 
 // Forward declarations
 void resetState(ScreenState& state);
-void initScreenState(ScreenState& state, Screen& scr);
+void initScreenState(ScreenState& state, const Screen& scr);
 void switchScreen();
 void postEvent(const char* event);
 void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data);
@@ -201,7 +202,6 @@ void checkButtons() {
                 timer.active = false;
                 timer.fired = false;
                 notifViewerOpen = false;
-                notifSlideY = -8;
             }
             notifSlideY = -8;
             notifScrollX = 0;
@@ -281,13 +281,11 @@ void checkButtons() {
                     notifViewerIdx = 0;
                 } else {
                     notifViewerOpen = false;
-                    notifSlideY = -8;
                 }
             } else {
                 notifViewerIdx++;
                 if (notifViewerIdx >= notifCount) {
                     notifViewerOpen = false;
-                    notifSlideY = -8;
                     notifCount = 0;
                     for (auto& n : notifications) n.active = false;
                 }
@@ -397,7 +395,7 @@ void handleTimer() {
         timer.active = true;
         timer.fired = false;
         beepOnce(1500, 50);
-        Serial.printf("[timer] started %lums\n", timer.duration);
+        Serial.printf("[timer] started %ums\n", (unsigned)timer.duration);
         httpServer.send(200, "application/json", "{\"ok\":true}");
     } else if (httpServer.method() == HTTP_DELETE) {
         // Cancel timer
@@ -646,7 +644,7 @@ void setupWiFi() {
             client.print("Access-Control-Allow-Origin: *\r\n");
             client.print("Connection: close\r\n\r\n");
 
-            // Save current render buffer so live display isn't corrupted
+                // Save current render buffer so live display isn't corrupted
             static CRGB savedBuf[NUM_LEDS];
             const uint8_t* fbSave = display.getFramebuffer();
             memcpy(savedBuf, fbSave, sizeof(savedBuf));
@@ -681,8 +679,7 @@ void setupWiFi() {
                 yield();
             }
 
-            // Restore render buffer
-            memcpy((void*)fbSave, savedBuf, sizeof(savedBuf));
+            memcpy(const_cast<uint8_t*>(fbSave), savedBuf, sizeof(savedBuf));
         });
 
         // Render arbitrary layers: POST /render {"layers":[...], "frames":30, "display":false}
@@ -755,9 +752,8 @@ void setupWiFi() {
                 yield();
             }
 
-            // Restore buffer (unless displaying on device)
             if (!showOnDevice) {
-                memcpy((void*)fbSave, savedBuf, sizeof(savedBuf));
+                memcpy(const_cast<uint8_t*>(fbSave), savedBuf, sizeof(savedBuf));
             }
         });
 
@@ -828,8 +824,7 @@ void setupWiFi() {
                 yield();
             }
             gif.end();
-
-            memcpy((void*)fbSave, savedBuf, sizeof(savedBuf));
+            memcpy(const_cast<uint8_t*>(fbSave), savedBuf, sizeof(savedBuf));
         });
 
         // POST /gif — render arbitrary layers as animated GIF
@@ -902,7 +897,7 @@ void setupWiFi() {
                 yield();
             }
             gif.end();
-            memcpy((void*)fbSave, savedBuf, sizeof(savedBuf));
+            memcpy(const_cast<uint8_t*>(fbSave), savedBuf, sizeof(savedBuf));
         });
 
         // CORS for browser UI access
@@ -944,7 +939,7 @@ void handleSerial() {
 
 // --- Layer Rendering ---
 
-void initScreenState(ScreenState& state, Screen& scr) {
+void initScreenState(ScreenState& state, const Screen& scr) {
     state.textStates.clear();
     state.iconStates.clear();
     state.particleSystems.clear();
@@ -952,7 +947,7 @@ void initScreenState(ScreenState& state, Screen& scr) {
     state.startTime = millis();
     state.inited = true;
 
-    for (auto& layer : scr.layers) {
+    for (const auto& layer : scr.layers) {
         if (layer.type == LAYER_TEXT || layer.type == LAYER_CLOCK) {
             state.textStates.push_back(TextState());
         }
@@ -997,8 +992,7 @@ static float evaluateTween(const Layer::Tween& tw, uint32_t elapsed) {
 }
 
 static void applyTweens(Layer& layer, uint32_t elapsed) {
-    for (auto& tw : layer.tweens) {
-        float val = evaluateTween(tw, elapsed);
+    for (const auto& tw : layer.tweens) {
         if (tw.prop == "x") layer.x = (int16_t)val;
         else if (tw.prop == "y") layer.y = (int16_t)val;
         else if (tw.prop == "opacity") layer.opacity = (uint8_t)constrain((int)val, 0, 255);
@@ -1190,12 +1184,7 @@ void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data) {
 
         case LAYER_GAUGE: {
             float val = 0;
-            if (!layer.value_key.isEmpty()) {
-                val = data[layer.value_key.c_str()].as<float>();
-            }
-            Icon gaugeIcon;
-            gaugeIcon.width = layer.gauge_w;
-            gaugeIcon.height = layer.gauge_h;
+            if (!layer.value_key.isEmpty()) val = data[layer.value_key.c_str()].as<float>();
             drawGauge(display, layer.gauge, layer.gauge_w, layer.gauge_h, layer.range, val, layer.x, layer.y);
             break;
         }
@@ -1222,7 +1211,7 @@ void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data) {
                     display.drawPixel(layer.x, row, layer.pixels_color);
                 }
             } else if (layer.pixels_pattern == "dots" && !layer.pixels_points.empty()) {
-                for (auto& pt : layer.pixels_points) {
+                for (const auto& pt : layer.pixels_points) {
                     display.drawPixel(layer.x + pt.first, layer.y + pt.second, layer.pixels_color);
                 }
             }
@@ -1270,12 +1259,9 @@ void resetState(ScreenState& state) {
     state.particleSystems.clear();
 }
 
-bool screenHasScrolling(ScreenState& state) {
-    for (auto& ts : state.textStates) {
-        if ((ts.mode == SCROLL_LEFT || ts.mode == SCROLL_BOUNCE) && !ts.completedOnce)
-            return true;
-    }
-    return false;
+bool screenHasScrolling(const ScreenState& state) {
+    return std::any_of(state.textStates.begin(), state.textStates.end(),
+        [](const TextState& ts) { return (ts.mode == SCROLL_LEFT || ts.mode == SCROLL_BOUNCE) && !ts.completedOnce; });
 }
 
 void switchScreen() {
@@ -1299,7 +1285,7 @@ void showClock() {
     display.clear();
     char buf[6] = "00:00";
     if (getLocalTime(&t)) snprintf(buf, sizeof(buf), "%02d:%02d", t.tm_hour, t.tm_min);
-    else { uint32_t s = millis()/1000; snprintf(buf, sizeof(buf), "%02lu:%02lu", (s/60)%100, s%60); }
+    else { uint32_t s = millis()/1000; snprintf(buf, sizeof(buf), "%02u:%02u", (unsigned)((s/60)%100), (unsigned)(s%60)); }
     display.drawText(buf, 2, 0, 0x00AAFF);
     display.show();
 }
@@ -1336,8 +1322,8 @@ void loop() {
     if (now - lastSensorRead > SENSOR_READ_MS) { sensors.read(); lastSensorRead = now; }
 
     // Config — with exponential backoff on failure
-    static uint32_t configBackoff = CONFIG_POLL_MS;
-    static bool lastFetchFailed = false;
+    static uint32_t configBackoff = CONFIG_POLL_MS; // cppcheck-suppress variableScope
+    static bool lastFetchFailed = false;             // cppcheck-suppress variableScope
     if (!configURL.isEmpty() && WiFi.status() == WL_CONNECTED) {
         if (!config.valid || now - lastConfigFetch > configBackoff) {
             Config newCfg;
@@ -1478,7 +1464,7 @@ void loop() {
                     }
 
                     // Draw text (offset by icon width, clipped to not overlap icon)
-                    for (auto& l : n.layers) {
+                    for (const auto& l : n.layers) {
                         if (l.type == LAYER_TEXT) {
                             int16_t textW = display.nativeTextWidth(l.label);
                             int16_t availW = MATRIX_WIDTH - iconW;
@@ -1513,7 +1499,7 @@ void loop() {
                 notifSlideY = -8;
             }
         }
-    } else if ((notifCount > 0 || timer.active) && !notifViewerOpen) {
+    } else if ((notifCount > 0 || timer.active)) { // notifViewerOpen is false here by structure
         // Timer indicator dot
         if (timer.active && !timerPaused) {
             // Breathing dot — speed increases as time runs out

@@ -40,18 +40,6 @@ export default [
       'unused-imports/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       'no-console': 'off',
       'no-empty': ['error', { allowEmptyCatch: false }],
-
-      // JSDoc enforcement
-      'jsdoc/require-jsdoc': [
-        'warn',
-        {
-          require: { FunctionDeclaration: true },
-          checkConstructors: false,
-        },
-      ],
-      'jsdoc/require-param-type': 'warn',
-      'jsdoc/require-returns-type': 'warn',
-      'jsdoc/valid-types': 'warn',
     },
   },
   {
@@ -63,7 +51,7 @@ export default [
     },
   },
   {
-    ignores: ['node_modules/', 'src/vendor/'],
+    ignores: ['node_modules/', 'src/vendor/', 'firmware/.pio/'],
   },
   prettier,
 ];

@@ -48,7 +48,7 @@ void Display::renderToMain() {
 
 const uint8_t* Display::getFramebuffer() {
     // CRGB is {r, g, b} — 3 bytes per pixel, same layout as raw RGB
-    return (const uint8_t*)render_buf;
+    return reinterpret_cast<const uint8_t*>(render_buf);
 }
 
 void Display::clear() {

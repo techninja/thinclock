@@ -73,7 +73,7 @@ export const icons = {
   },
 };
 
-export const screen = (config) => ({
+export const screen = (_config) => ({
   duration: 15000,
   data_url: 'self://ping',
   layers: [

@@ -119,7 +119,7 @@ void RenderClient::tick(Display& display, ConfigManager& configMgr, Config& conf
             sendFrame(display);
 
             // Restore live display
-            memcpy((void*)fb, savedBuf, sizeof(savedBuf));
+            memcpy(const_cast<uint8_t*>(fb), savedBuf, sizeof(savedBuf));
 
             _framesDone++;
             if (_framesDone >= _framesTotal) {

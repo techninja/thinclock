@@ -16,6 +16,7 @@ struct Particle {
 
 class ParticleSystem {
 public:
+    ParticleSystem() : config{}, particles{}, maskGrid{} {}
     void init(const ParticleConfig& cfg);
     void tick(uint32_t dt_ms);
     void render(Display& display);

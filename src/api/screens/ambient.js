@@ -8,9 +8,6 @@ export const screen = (config) => {
   // Slowly rotate hue based on time — shifts every config poll (30s)
   const t = (Date.now() / 120000) % 1; // cycles every 2 minutes
 
-  /**
-   *
-   */
   function hslToHex(h) {
     const s = 0.8,
       l = 0.35;

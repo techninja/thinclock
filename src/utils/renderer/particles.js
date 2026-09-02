@@ -32,20 +32,12 @@ export function initParticles(layer) {
   }
   return state;
 }
-
-/**
- *
- */
 function randomColor(colors) {
   if (!colors?.stops?.length) return [255, 255, 255];
   const pos = Math.random();
   const val = (colors.min || 0) + pos * ((colors.max || 1) - (colors.min || 0));
   return colorFromStops(colors.stops, val);
 }
-
-/**
- *
- */
 function spawn(state, em, colors) {
   for (const p of state.particles) {
     if (p.alive) continue;

@@ -63,10 +63,6 @@ const FONT_5X7 = [
   [0x7f, 0x49, 0x49, 0x49, 0x7f],
   [0x4f, 0x49, 0x49, 0x49, 0x7f],
 ];
-
-/**
- *
- */
 function drawGlyph(buf, x, y, cols, rows, r, g, b) {
   for (let col = 0; col < cols.length; col++) {
     for (let row = 0; row < rows; row++) {
@@ -74,10 +70,6 @@ function drawGlyph(buf, x, y, cols, rows, r, g, b) {
     }
   }
 }
-
-/**
- *
- */
 function drawChar(buf, ch, cx, y, r, g, b, large) {
   if (ch >= '0' && ch <= '9') {
     const d = ch.charCodeAt(0) - 48;

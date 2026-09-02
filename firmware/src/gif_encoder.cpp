@@ -90,7 +90,7 @@ void GifEncoder::begin(WiFiClient& client, uint16_t delayMs, uint8_t scale, uint
 }
 
 void GifEncoder::writeHeader() {
-    write((const uint8_t*)"GIF89a", 6);
+    write(reinterpret_cast<const uint8_t*>("GIF89a"), 6);
     write16(_outW);
     write16(_outH);
     write8(0xF7); // GCT 256 colors
@@ -99,7 +99,7 @@ void GifEncoder::writeHeader() {
     write(_palette, 256 * 3);
     // NETSCAPE looping
     write8(0x21); write8(0xFF); write8(0x0B);
-    write((const uint8_t*)"NETSCAPE2.0", 11);
+    write(reinterpret_cast<const uint8_t*>("NETSCAPE2.0"), 11);
     write8(0x03); write8(0x01);
     write16(0);
     write8(0x00);

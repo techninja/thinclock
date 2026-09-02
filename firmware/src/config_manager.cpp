@@ -7,7 +7,7 @@ static std::vector<uint8_t> hexToBytes(const char* hex) {
     std::vector<uint8_t> bytes;
     size_t len = strlen(hex);
     for (size_t i = 0; i + 1 < len; i += 2) {
-        char pair[3] = { hex[i], hex[i+1], 0 };
+        char pair[3] = { hex[i], hex[i+1], 0 }; // cppcheck-suppress constVariable
         bytes.push_back((uint8_t)strtoul(pair, NULL, 16));
     }
     return bytes;

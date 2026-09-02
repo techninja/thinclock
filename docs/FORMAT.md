@@ -1,7 +1,5 @@
 # thinclock JSON Config Format
 
-**Version: 0.9.0**
-
 The device GETs a config URL every 30 seconds and renders whatever it receives.
 
 ## Config Structure

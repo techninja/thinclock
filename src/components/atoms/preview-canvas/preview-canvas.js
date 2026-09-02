@@ -19,10 +19,6 @@ const gammaLUT = new Uint8Array(256);
 for (let i = 0; i < 256; i++) {
   gammaLUT[i] = Math.round(Math.pow(i / 255, 1 / GAMMA) * 255);
 }
-
-/**
- *
- */
 function paintFrame(ctx, buf, offset) {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
@@ -39,10 +35,6 @@ function paintFrame(ctx, buf, offset) {
     }
   }
 }
-
-/**
- *
- */
 async function loadFrames(host) {
   try {
     const resp = await fetch(`/api/device/preview?screen=${host.screen}&frames=${host.frames}`);
@@ -52,14 +44,10 @@ async function loadFrames(host) {
     host._frameMs = parseInt(resp.headers.get('X-Frame-Ms')) || 20;
     host._frame = 0;
     startPlayback(host);
-  } catch (e) {
+  } catch {
     /* device offline */
   }
 }
-
-/**
- *
- */
 function startPlayback(host) {
   if (host._interval) clearInterval(host._interval);
   if (!host._buf || host._frameCount <= 1) {
