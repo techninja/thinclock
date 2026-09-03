@@ -6,6 +6,7 @@
 import { WebSocketServer } from 'ws';
 
 let deviceWs = null;
+let deviceIP = null;
 let currentJob = null;
 let jobFrames = [];
 const renderQueue = [];
@@ -13,8 +14,9 @@ const renderQueue = [];
 export const wssBrowser = new WebSocketServer({ noServer: true });
 export const wssDevice = new WebSocketServer({ noServer: true });
 
-wssDevice.on('connection', (ws) => {
-  console.log('[ws/device] connected');
+wssDevice.on('connection', (ws, req) => {
+  deviceIP = req.socket.remoteAddress?.replace('::ffff:', '') || null;
+  console.log(`[ws/device] connected ${deviceIP}`);
   deviceWs = ws;
   ws.on('message', (data, isBinary) => {
     if (isBinary) {
@@ -37,6 +39,7 @@ wssDevice.on('connection', (ws) => {
   ws.on('close', () => {
     console.log('[ws/device] disconnected');
     deviceWs = null;
+    deviceIP = null;
     if (currentJob) failJob('disconnected');
   });
 });
@@ -53,6 +56,9 @@ export function handleUpgrade(req, socket, head) {
     socket.destroy();
   }
 }
+
+/** @returns {string|null} */
+export function getConnectedDeviceIP() { return deviceIP; }
 
 /** @param {object} command */
 export function queueRender(command) {

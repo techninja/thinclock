@@ -12,7 +12,7 @@ import {
   generatePreview,
   PreviewCache,
 } from './api/lib/device-proxy.js';
-import { handleUpgrade } from './api/lib/ws-render.js';
+import { handleUpgrade, getConnectedDeviceIP } from './api/lib/ws-render.js';
 import { registerRoutes } from './api/routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -34,7 +34,7 @@ const LOCAL_IP = (() => {
   return '127.0.0.1';
 })();
 const BASE = `http://${LOCAL_IP}:${PORT}`;
-const getDeviceIP = () => process.env.DEVICE_IP || null;
+const getDeviceIP = () => getConnectedDeviceIP() || process.env.DEVICE_IP || null;
 
 const config = {
   BASE: `${BASE}/api`,
