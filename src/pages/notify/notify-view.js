@@ -9,8 +9,8 @@ function sendNotify(host) {
   import('#utils/device.js').then(({ devicePost }) => {
     devicePost('/notify', {
       text: host._text,
-      color: host._color,
-      beep: host._beep,
+      color: host._color.replace('#', ''),
+      beep: host._beep ? 'single' : 'none',
     })
       .then(() => {
         host._status = 'Sent!';
