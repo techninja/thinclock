@@ -1,3 +1,14 @@
 .env
 node_modules/
 firmware/.pio/
+
+ui/node_modules/
+ui/src/vendor/
+ui/src/icons.json
+src/vendor/
+src/icons.json
+data/db.json
+.env.local
+data/preview-cache/
+.DS_Store
+.vscode/

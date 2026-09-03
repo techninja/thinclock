@@ -1,0 +1,16 @@
+/* Component styles aggregator.
+   Add one @import per component as they are created.
+   Loaded once in index.html — all light DOM components inherit these. */
+
+/* Atoms */
+@import '../components/atoms/app-button/app-button.css';
+@import '../components/atoms/app-badge/app-badge.css';
+@import '../components/atoms/app-icon/app-icon.css';
+@import '../components/atoms/theme-toggle/theme-toggle.css';
+
+/* Molecules */
+@import '../components/molecules/app-nav/app-nav.css';
+
+/* Atoms (additional) */
+@import '../components/atoms/preview-canvas/preview-canvas.css';
+@import '../components/atoms/live-preview/live-preview.css';

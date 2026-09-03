@@ -191,7 +191,7 @@ void ParticleSystem::render(Display& display) {
     }
 
     // Draw particles
-    for (auto& p : particles) {
+    for (const auto& p : particles) {
         if (!p.alive) continue;
 
         uint32_t color = p.color;

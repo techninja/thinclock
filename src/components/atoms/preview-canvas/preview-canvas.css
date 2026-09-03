@@ -1,0 +1,8 @@
+preview-canvas {
+  display: inline-block;
+
+  & canvas {
+    background: #000;
+    border-radius: var(--radius-sm);
+  }
+}

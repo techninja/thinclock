@@ -2,7 +2,9 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <HTTPClient.h>
+#include <ESPmDNS.h>
 #include <time.h>
+#include <algorithm>
 #include <Preferences.h>
 #include "thinclock.h"
 #include "display.h"
@@ -10,6 +12,9 @@
 #include "sensors.h"
 #include "gauge.h"
 #include "particles.h"
+#include "gif_encoder.h"
+#include "render_client.h"
+#include "screen_state.h"
 
 Display display;
 ConfigManager configMgr;
@@ -17,38 +22,13 @@ Config config;
 Preferences prefs;
 Sensors sensors;
 WebServer httpServer(80);
+RenderClient renderClient;
 
 String wifiSSID, wifiPass, configURL;
 uint32_t lastConfigFetch = 0, lastDataFetch = 0, lastSensorRead = 0;
 uint32_t lastScreenSwitch = 0, lastButtonCheck = 0;
 int currentScreen = 0;
 JsonDocument screenData;
-
-// --- Per-layer state ---
-struct TextState {
-    int16_t offset = 0;
-    int8_t dir = 1;
-    uint32_t pauseUntil = 0;
-    uint32_t lastStep = 0;
-    ScrollMode mode = SCROLL_NONE;
-    int16_t textW = 0;
-    bool completedOnce = false;
-    String resolved;
-};
-
-struct IconState {
-    uint8_t frame = 0;
-    uint32_t lastStep = 0;
-};
-
-struct ScreenState {
-    std::vector<TextState> textStates;
-    std::vector<IconState> iconStates;
-    std::vector<ParticleSystem> particleSystems;
-    uint32_t lastTick = 0;
-    uint32_t startTime = 0;
-    bool inited = false;
-};
 
 ScreenState currentState;
 ScreenState prevState;
@@ -74,7 +54,7 @@ uint32_t notifOpenTime = 0;
 #define NOTIF_SCROLL_SPEED 80
 
 // Timer
-Timer timer = {0, 0, 0x00AAFF, false, false};
+Timer timer;
 uint32_t timerBreathPhase = 0;
 
 // Buttons
@@ -94,10 +74,12 @@ uint32_t lastNavTime = 0;
 // LDR "button" (cover sensor to trigger)
 bool ldrCovered = false;
 uint32_t ldrCoverStart = 0;
-#define LDR_COVER_THRESHOLD 50   // raw analog value considered "covered"
-#define LDR_COVER_MIN_MS 200     // must be covered at least this long
-#define LDR_COOLDOWN_MS 1000     // cooldown after trigger
+#define LDR_COVER_MIN_MS 200      // must be covered at least this long
+#define LDR_COOLDOWN_MS 1000      // cooldown after trigger
+#define LDR_AMBIENT_MIN 80        // baseline must be at least this to arm
+#define LDR_COVER_RATIO 0.35f     // reading must drop to this fraction of baseline
 uint32_t lastLdrTrigger = 0;
+uint16_t ldrBaseline = 0;         // rolling ambient baseline
 bool timerPaused = false;
 uint32_t timerPausedRemaining = 0;
 
@@ -127,8 +109,10 @@ void beepTriple() {
 
 // Forward declarations
 void resetState(ScreenState& state);
+void initScreenState(ScreenState& state, const Screen& scr);
 void switchScreen();
 void postEvent(const char* event);
+void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data);
 
 // --- Buttons ---
 void navigatePrev() {
@@ -154,7 +138,14 @@ void checkLDR() {
     uint16_t ldr = analogRead(LDR_PIN);
     uint32_t now = millis();
 
-    if (ldr < LDR_COVER_THRESHOLD) {
+    // Update rolling baseline when not covered (slow decay toward ambient)
+    if (!ldrCovered) ldrBaseline = ldrBaseline ? (ldrBaseline * 15 + ldr) / 16 : ldr;
+
+    // Disarm entirely when ambient is too dark to distinguish a cover
+    bool armed = ldrBaseline >= LDR_AMBIENT_MIN;
+    bool isCovered = armed && ldr < (uint16_t)(ldrBaseline * LDR_COVER_RATIO);
+
+    if (isCovered) {
         if (!ldrCovered) {
             ldrCovered = true;
             ldrCoverStart = now;
@@ -220,7 +211,6 @@ void checkButtons() {
                 timer.active = false;
                 timer.fired = false;
                 notifViewerOpen = false;
-                notifSlideY = -8;
             }
             notifSlideY = -8;
             notifScrollX = 0;
@@ -300,13 +290,11 @@ void checkButtons() {
                     notifViewerIdx = 0;
                 } else {
                     notifViewerOpen = false;
-                    notifSlideY = -8;
                 }
             } else {
                 notifViewerIdx++;
                 if (notifViewerIdx >= notifCount) {
                     notifViewerOpen = false;
-                    notifSlideY = -8;
                     notifCount = 0;
                     for (auto& n : notifications) n.active = false;
                 }
@@ -416,7 +404,7 @@ void handleTimer() {
         timer.active = true;
         timer.fired = false;
         beepOnce(1500, 50);
-        Serial.printf("[timer] started %lums\n", timer.duration);
+        Serial.printf("[timer] started %ums\n", (unsigned)timer.duration);
         httpServer.send(200, "application/json", "{\"ok\":true}");
     } else if (httpServer.method() == HTTP_DELETE) {
         // Cancel timer
@@ -438,6 +426,58 @@ void handleTimer() {
 }
 
 // --- WiFi & Serial ---
+
+// Show scrolling text on the display (blocking, for status messages)
+void scrollText(const String& text, uint32_t color = 0x00AAFF) {
+    int16_t textW = display.nativeTextWidth(text, 1, false);
+    for (int16_t x = MATRIX_WIDTH; x > -textW; x--) {
+        display.clear();
+        display.drawNativeText(text, x, 1, color, 1, false);
+        display.show();
+        delay(80);
+    }
+}
+
+void startAPMode() {
+    Serial.println("[wifi] Starting AP: thinclock-setup");
+    display.clear();
+    display.drawNativeText("SETUP", 1, 1, 0xFF8800, 1, false);
+    display.show();
+
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP("thinclock-setup", "thinclock");
+    Serial.printf("[wifi] AP IP: %s\n", WiFi.softAPIP().toString().c_str());
+
+    // Serve setup page
+    httpServer.on("/", HTTP_GET, []() {
+        httpServer.send(200, "text/html; charset=utf-8",
+            "<html><body style='font-family:sans-serif;max-width:400px;margin:2em auto'>" \
+            "<h2>thinclock setup</h2>" \
+            "<form method='POST' action='/setup'>" \
+            "<label>WiFi SSID<br><input name='ssid' style='width:100%'></label><br><br>" \
+            "<label>WiFi Password<br><input name='pass' type='password' style='width:100%'></label><br><br>" \
+            "<label>Config URL<br><input name='config_url' style='width:100%' placeholder='http://192.168.x.x:3232/api/config'></label><br><br>" \
+            "<button type='submit' style='padding:8px 16px'>Save &amp; Reboot</button>" \
+            "</form></body></html>"
+        );
+    });
+    httpServer.on("/setup", HTTP_POST, []() {
+        String ssid = httpServer.arg("ssid");
+        String pass = httpServer.arg("pass");
+        String url  = httpServer.arg("config_url");
+        if (ssid.isEmpty()) { httpServer.send(400, "text/plain", "SSID required"); return; }
+        prefs.begin("thinclock", false);
+        prefs.putString("ssid", ssid);
+        prefs.putString("pass", pass);
+        if (!url.isEmpty()) prefs.putString("config_url", url);
+        prefs.end();
+        httpServer.send(200, "text/html; charset=utf-8", "<html><body><h2>Saved! Rebooting...</h2></body></html>");
+        delay(1000);
+        ESP.restart();
+    });
+    httpServer.begin();
+}
+
 void setupWiFi() {
     prefs.begin("thinclock", true);
     wifiSSID = prefs.getString("ssid", "");
@@ -446,21 +486,37 @@ void setupWiFi() {
     prefs.end();
 
     if (wifiSSID.isEmpty()) {
-        Serial.println("No WiFi. Send: {\"ssid\":\"...\",\"pass\":\"...\",\"config_url\":\"...\"}");
+        Serial.println("No WiFi credentials — starting AP mode");
+        startAPMode();
         return;
     }
     WiFi.begin(wifiSSID.c_str(), wifiPass.c_str());
     Serial.printf("Connecting to %s", wifiSSID.c_str());
+    display.clear();
+    display.drawNativeText("WIFI", 1, 1, 0x0044FF, 1, false);
+    display.show();
     uint32_t start = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) { delay(250); Serial.print("."); }
-    Serial.println(WiFi.status() == WL_CONNECTED ? " OK" : " FAIL");
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.printf("IP: %s\n", WiFi.localIP().toString().c_str());
-        configTzTime("UTC0", "pool.ntp.org");
-        httpServer.on("/sensors", handleSensors);
-        httpServer.on("/status", handleStatus);
-        httpServer.on("/notify", handleNotify);
-        httpServer.on("/timer", handleTimer);
+    while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) { delay(250); Serial.print("."); }
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println(" FAIL — starting AP mode");
+        startAPMode();
+        return;
+    }
+    Serial.printf(" OK\nIP: %s\n", WiFi.localIP().toString().c_str());
+    // Scroll IP on display so user can find the device
+    scrollText("IP " + WiFi.localIP().toString(), 0x00FF44);
+    // Advertise via mDNS so HA integration can auto-discover
+    if (MDNS.begin("thinclock")) {
+        MDNS.addService("_thinclock", "_tcp", 80);
+        MDNS.addServiceTxt("_thinclock", "_tcp", "version", "0.9.0");
+        MDNS.addServiceTxt("_thinclock", "_tcp", "ip", WiFi.localIP().toString());
+        Serial.println("[mdns] thinclock.local");
+    }
+    configTzTime("UTC0", "pool.ntp.org");
+    httpServer.on("/sensors", handleSensors);
+    httpServer.on("/status", handleStatus);
+    httpServer.on("/notify", handleNotify);
+    httpServer.on("/timer", handleTimer);
         httpServer.on("/beep", HTTP_POST, []() {
             // POST /beep {"pattern":[[freq, duration, pause], ...]}
             // or shorthand: {"type":"single|double|triple|alarm"}
@@ -482,8 +538,394 @@ void setupWiFi() {
             }
             httpServer.send(200, "application/json", "{\"ok\":true}");
         });
+        // Direct display control: push layers to render immediately
+        httpServer.on("/display", HTTP_POST, []() {
+            // POST /display {"layers":[...], "duration": 5000}
+            // Temporarily overrides current screen with provided layers
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, httpServer.arg("plain"));
+            if (err) { httpServer.send(400, "application/json", "{\"error\":\"parse\"}"); return; }
+            // TODO: parse layers and render as temporary override screen
+            httpServer.send(200, "application/json", "{\"ok\":true}");
+        });
+
+        // Device info
+        httpServer.on("/", HTTP_GET, []() {
+            String ip = WiFi.localIP().toString();
+            String cfg = config.valid ? "<span style='color:#4c4'>&#x2714; connected</span>" : "<span style='color:#c44'>&#x2718; not connected</span>";
+            httpServer.send(200, "text/html; charset=utf-8",
+                "<html><head><meta name='viewport' content='width=device-width,initial-scale=1'>" \
+                "<style>body{font-family:sans-serif;max-width:420px;margin:2em auto;padding:0 1em}" \
+                "input{width:100%;box-sizing:border-box;padding:6px;margin-top:4px}" \
+                "button{padding:8px 16px;margin-top:8px;cursor:pointer}</style></head><body>" \
+                "<h2>&#x1F551; thinclock</h2>" \
+                "<p>IP: <b>" + ip + "</b> &nbsp; Config: " + cfg + "</p>" \
+                "<form method='POST' action='/setup'>" \
+                "<label>WiFi SSID<br><input name='ssid' value='" + wifiSSID + "'></label><br><br>" \
+                "<label>WiFi Password<br><input name='pass' type='password' placeholder='(unchanged)'></label><br><br>" \
+                "<label>Config URL<br><input name='config_url' value='" + configURL + "'></label><br>" \
+                "<button type='submit'>Save &amp; Reboot</button>" \
+                "</form>" \
+                "<hr><p style='font-size:0.85em'><a href='/info'>info</a> &middot; <a href='/sensors'>sensors</a> &middot; <a href='/status'>status</a></p>" \
+                "</body></html>"
+            );
+        });
+        httpServer.on("/setup", HTTP_POST, []() {
+            String ssid = httpServer.arg("ssid");
+            String pass = httpServer.arg("pass");
+            String url  = httpServer.arg("config_url");
+            if (ssid.isEmpty()) { httpServer.send(400, "text/plain", "SSID required"); return; }
+            prefs.begin("thinclock", false);
+            prefs.putString("ssid", ssid);
+            if (!pass.isEmpty()) prefs.putString("pass", pass);
+            prefs.putString("config_url", url);
+            prefs.end();
+            httpServer.send(200, "text/html; charset=utf-8", "<html><body><h2>Saved! Rebooting...</h2></body></html>");
+            delay(1000);
+            ESP.restart();
+        });
+        httpServer.on("/info", HTTP_GET, []() {
+            JsonDocument doc;
+            doc["firmware"] = "thinclock";
+            doc["version"] = "0.9.0";
+            doc["build"] = __DATE__ " " __TIME__;
+            doc["chip"] = ESP.getChipModel();
+            doc["flash"] = ESP.getFlashChipSize();
+            doc["free_heap"] = ESP.getFreeHeap();
+            doc["uptime"] = millis() / 1000;
+            doc["wifi_ssid"] = WiFi.SSID();
+            doc["ip"] = WiFi.localIP().toString();
+            doc["rssi"] = WiFi.RSSI();
+            doc["config_url"] = configURL;
+            String out; serializeJson(doc, out);
+            httpServer.send(200, "application/json", out);
+        });
+
+        // Raw framebuffer: 768 bytes RGB (32x8x3), logical pixel order
+        httpServer.on("/framebuffer", HTTP_GET, []() {
+            const uint8_t* fb = display.getFramebuffer();
+            // Unzigzag: convert physical LED order to logical x,y order
+            static uint8_t linear[NUM_LEDS * 3];
+            for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
+                for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+                    uint8_t physX = (y % 2 == 0) ? x : (MATRIX_WIDTH - 1 - x);
+                    uint16_t src = (y * MATRIX_WIDTH + physX) * 3;
+                    uint16_t dst = (y * MATRIX_WIDTH + x) * 3;
+                    linear[dst] = fb[src];
+                    linear[dst + 1] = fb[src + 1];
+                    linear[dst + 2] = fb[src + 2];
+                }
+            }
+            WiFiClient client = httpServer.client();
+            client.print("HTTP/1.1 200 OK\r\n");
+            client.print("Content-Type: application/octet-stream\r\n");
+            client.printf("Content-Length: %d\r\n", NUM_LEDS * 3);
+            client.print("Cache-Control: no-store\r\n");
+            client.print("Access-Control-Allow-Origin: *\r\n");
+            client.print("Connection: close\r\n\r\n");
+            client.write(linear, NUM_LEDS * 3);
+        });
+
+        // Preview: render N frames of a screen, stream as raw RGB
+        // GET /preview?screen=0&frames=30
+        httpServer.on("/preview", HTTP_GET, []() {
+            if (!config.valid || config.screens.empty()) {
+                httpServer.send(400, "application/json", "{\"error\":\"no config\"}");
+                return;
+            }
+            int screenIdx = httpServer.arg("screen").toInt();
+            int frames = httpServer.arg("frames").toInt();
+            if (screenIdx < 0 || screenIdx >= (int)config.screens.size()) {
+                httpServer.send(400, "application/json", "{\"error\":\"invalid screen\"}");
+                return;
+            }
+            if (frames < 1) frames = 1;
+            if (frames > 120) frames = 120;
+
+            uint32_t totalBytes = NUM_LEDS * 3 * frames;
+            WiFiClient client = httpServer.client();
+            client.print("HTTP/1.1 200 OK\r\n");
+            client.print("Content-Type: application/octet-stream\r\n");
+            client.printf("Content-Length: %d\r\n", totalBytes);
+            client.printf("X-Frames: %d\r\n", frames);
+            client.printf("X-Frame-Ms: %d\r\n", 20);
+            client.print("Cache-Control: public, max-age=60\r\n");
+            client.print("Access-Control-Allow-Origin: *\r\n");
+            client.print("Connection: close\r\n\r\n");
+
+                // Save current render buffer so live display isn't corrupted
+            static CRGB savedBuf[NUM_LEDS];
+            const uint8_t* fbSave = display.getFramebuffer();
+            memcpy(savedBuf, fbSave, sizeof(savedBuf));
+
+            // Render frames using isolated state
+            Screen& scr = config.screens[screenIdx];
+            ScreenState previewState;
+            resetState(previewState);
+            initScreenState(previewState, scr);
+            JsonDocument previewData;
+            if (!scr.data_url.isEmpty()) {
+                configMgr.fetchData(scr.data_url, previewData);
+            }
+
+            static uint8_t linear[NUM_LEDS * 3];
+            for (int f = 0; f < frames; f++) {
+                display.clear();
+                renderScreen(scr, previewState, previewData);
+                const uint8_t* fb = display.getFramebuffer();
+                // Unzigzag
+                for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
+                    for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+                        uint8_t physX = (y % 2 == 0) ? x : (MATRIX_WIDTH - 1 - x);
+                        uint16_t src = (y * MATRIX_WIDTH + physX) * 3;
+                        uint16_t dst = (y * MATRIX_WIDTH + x) * 3;
+                        linear[dst] = fb[src];
+                        linear[dst + 1] = fb[src + 1];
+                        linear[dst + 2] = fb[src + 2];
+                    }
+                }
+                client.write(linear, NUM_LEDS * 3);
+                yield();
+            }
+
+            memcpy(const_cast<uint8_t*>(fbSave), savedBuf, sizeof(savedBuf));
+        });
+
+        // Render arbitrary layers: POST /render {"layers":[...], "frames":30, "display":false}
+        httpServer.on("/render", HTTP_POST, []() {
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, httpServer.arg("plain"));
+            if (err) { httpServer.send(400, "application/json", "{\"error\":\"parse\"}"); return; }
+
+            int frames = doc["frames"] | 1;
+            if (frames < 1) frames = 1;
+            if (frames > 120) frames = 120;
+            bool showOnDevice = doc["display"] | false;
+
+            // Parse into a temporary Screen
+            Screen tmpScreen;
+            tmpScreen.duration = 0;
+            tmpScreen.data_url = doc["data_url"] | "";
+            for (JsonObject l : doc["layers"].as<JsonArray>()) {
+                tmpScreen.layers.push_back(configMgr.parseLayer(l, config.scroll_speed));
+            }
+            // Merge any provided icons into config
+            if (doc["icons"].is<JsonObject>()) {
+                configMgr.parseIcons(doc["icons"].as<JsonObject>(), config.icons);
+            }
+
+            // Save render buffer
+            static CRGB savedBuf[NUM_LEDS];
+            const uint8_t* fbSave = display.getFramebuffer();
+            memcpy(savedBuf, fbSave, sizeof(savedBuf));
+
+            // Init state
+            ScreenState renderState;
+            resetState(renderState);
+            initScreenState(renderState, tmpScreen);
+
+            // Use inline data if provided
+            JsonDocument renderData;
+            if (doc["data"].is<JsonObject>()) {
+                renderData = doc["data"];
+            }
+
+            uint32_t totalBytes = NUM_LEDS * 3 * frames;
+            WiFiClient client = httpServer.client();
+            client.print("HTTP/1.1 200 OK\r\n");
+            client.print("Content-Type: application/octet-stream\r\n");
+            client.printf("Content-Length: %d\r\n", totalBytes);
+            client.printf("X-Frames: %d\r\n", frames);
+            client.printf("X-Frame-Ms: %d\r\n", 20);
+            client.print("Access-Control-Allow-Origin: *\r\n");
+            client.print("Connection: close\r\n\r\n");
+
+            static uint8_t linear[NUM_LEDS * 3];
+            for (int f = 0; f < frames; f++) {
+                display.clear();
+                renderScreen(tmpScreen, renderState, renderData);
+                const uint8_t* fb = display.getFramebuffer();
+                // Unzigzag
+                for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
+                    for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+                        uint8_t physX = (y % 2 == 0) ? x : (MATRIX_WIDTH - 1 - x);
+                        uint16_t src = (y * MATRIX_WIDTH + physX) * 3;
+                        uint16_t dst = (y * MATRIX_WIDTH + x) * 3;
+                        linear[dst] = fb[src];
+                        linear[dst + 1] = fb[src + 1];
+                        linear[dst + 2] = fb[src + 2];
+                    }
+                }
+                client.write(linear, NUM_LEDS * 3);
+                if (showOnDevice) display.show();
+                yield();
+            }
+
+            if (!showOnDevice) {
+                memcpy(const_cast<uint8_t*>(fbSave), savedBuf, sizeof(savedBuf));
+            }
+        });
+
+        // GIF preview: GET /gif?screen=0&seconds=2
+        // Returns animated GIF with frame deduplication
+        httpServer.on("/gif", HTTP_GET, []() {
+            if (!config.valid || config.screens.empty()) {
+                httpServer.send(400, "application/json", "{\"error\":\"no config\"}");
+                return;
+            }
+            int screenIdx = httpServer.arg("screen").toInt();
+            int seconds = httpServer.arg("seconds").toInt();
+            if (screenIdx < 0 || screenIdx >= (int)config.screens.size()) {
+                httpServer.send(400, "application/json", "{\"error\":\"invalid screen\"}");
+                return;
+            }
+            if (seconds < 1) seconds = 1;
+            if (seconds > 10) seconds = 10;
+            int frames = seconds * 15;
+            uint8_t scale = httpServer.arg("scale").toInt();
+            uint8_t gap = httpServer.arg("gap").toInt();
+            uint8_t gamma = httpServer.arg("gamma").toInt();
+            if (scale < 1) scale = 1;
+            if (gamma < 10) gamma = 18; // default 1.8
+
+            // Save render buffer
+            static CRGB savedBuf[NUM_LEDS];
+            const uint8_t* fbSave = display.getFramebuffer();
+            memcpy(savedBuf, fbSave, sizeof(savedBuf));
+
+            Screen& scr = config.screens[screenIdx];
+            ScreenState gifState;
+            resetState(gifState);
+            initScreenState(gifState, scr);
+            JsonDocument gifData;
+            if (!scr.data_url.isEmpty()) {
+                configMgr.fetchData(scr.data_url, gifData);
+            }
+
+            WiFiClient client = httpServer.client();
+            client.print("HTTP/1.1 200 OK\r\n");
+            client.print("Content-Type: image/gif\r\n");
+            client.print("Cache-Control: public, max-age=60\r\n");
+            client.print("Access-Control-Allow-Origin: *\r\n");
+            client.print("Connection: close\r\n\r\n");
+
+            GifEncoder gif;
+            gif.begin(client, 66, scale, gap, gamma);
+
+            static uint8_t linear[NUM_LEDS * 3];
+            for (int f = 0; f < frames; f++) {
+                display.clear();
+                renderScreen(scr, gifState, gifData);
+                const uint8_t* fb = display.getFramebuffer();
+                memset(linear, 0, sizeof(linear));
+                for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
+                    for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+                        uint8_t physX = (y % 2 == 0) ? x : (MATRIX_WIDTH - 1 - x);
+                        uint16_t src = (y * MATRIX_WIDTH + physX) * 3;
+                        uint16_t dst = (y * MATRIX_WIDTH + x) * 3;
+                        linear[dst] = fb[src];
+                        linear[dst + 1] = fb[src + 1];
+                        linear[dst + 2] = fb[src + 2];
+                    }
+                }
+                gif.addFrame(linear);
+                delay(66); // advance real time so particles/tweens progress
+                yield();
+            }
+            gif.end();
+            memcpy(const_cast<uint8_t*>(fbSave), savedBuf, sizeof(savedBuf));
+        });
+
+        // POST /gif — render arbitrary layers as animated GIF
+        httpServer.on("/gif", HTTP_POST, []() {
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, httpServer.arg("plain"));
+            if (err) { httpServer.send(400, "application/json", "{\"error\":\"parse\"}"); return; }
+
+            int seconds = doc["seconds"] | 2;
+            if (seconds < 1) seconds = 1;
+            if (seconds > 10) seconds = 10;
+            int frames = seconds * 15;
+            uint8_t scale = doc["scale"] | 1;
+            uint8_t gap = doc["gap"] | 0;
+            uint8_t gamma = doc["gamma"] | 18;
+            if (scale < 1) scale = 1;
+            if (gamma < 10) gamma = 18;
+
+            Screen tmpScreen;
+            tmpScreen.duration = 0;
+            tmpScreen.data_url = doc["data_url"] | "";
+            for (JsonObject l : doc["layers"].as<JsonArray>()) {
+                tmpScreen.layers.push_back(configMgr.parseLayer(l, config.scroll_speed));
+            }
+            if (doc["icons"].is<JsonObject>()) {
+                configMgr.parseIcons(doc["icons"].as<JsonObject>(), config.icons);
+            }
+
+            static CRGB savedBuf[NUM_LEDS];
+            const uint8_t* fbSave = display.getFramebuffer();
+            memcpy(savedBuf, fbSave, sizeof(savedBuf));
+
+            ScreenState renderState;
+            resetState(renderState);
+            initScreenState(renderState, tmpScreen);
+            JsonDocument renderData;
+            if (doc["data"].is<JsonObject>()) {
+                renderData = doc["data"];
+            } else if (!tmpScreen.data_url.isEmpty()) {
+                configMgr.fetchData(tmpScreen.data_url, renderData);
+            }
+
+            WiFiClient client = httpServer.client();
+            client.print("HTTP/1.1 200 OK\r\n");
+            client.print("Content-Type: image/gif\r\n");
+            client.print("Cache-Control: public, max-age=60\r\n");
+            client.print("Access-Control-Allow-Origin: *\r\n");
+            client.print("Connection: close\r\n\r\n");
+
+            GifEncoder gif;
+            gif.begin(client, 66, scale, gap, gamma);
+            static uint8_t linear[NUM_LEDS * 3];
+            for (int f = 0; f < frames; f++) {
+                display.clear();
+                renderScreen(tmpScreen, renderState, renderData);
+                const uint8_t* fb = display.getFramebuffer();
+                memset(linear, 0, sizeof(linear));
+                for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
+                    for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+                        uint8_t physX = (y % 2 == 0) ? x : (MATRIX_WIDTH - 1 - x);
+                        uint16_t src = (y * MATRIX_WIDTH + physX) * 3;
+                        uint16_t dst = (y * MATRIX_WIDTH + x) * 3;
+                        linear[dst] = fb[src];
+                        linear[dst + 1] = fb[src + 1];
+                        linear[dst + 2] = fb[src + 2];
+                    }
+                }
+                gif.addFrame(linear);
+                delay(66);
+                yield();
+            }
+            gif.end();
+            memcpy(const_cast<uint8_t*>(fbSave), savedBuf, sizeof(savedBuf));
+        });
+
+        // CORS for browser UI access
+        httpServer.enableCORS(true);
         httpServer.begin();
-    }
+
+        // Start WebSocket render client — connect back to config server
+        if (!configURL.isEmpty()) {
+            // Extract host and port from config URL (http://host:port/path)
+            String url = configURL;
+            url.replace("http://", "");
+            int slashIdx = url.indexOf('/');
+            if (slashIdx > 0) url = url.substring(0, slashIdx);
+            int colonIdx = url.indexOf(':');
+            String host = colonIdx > 0 ? url.substring(0, colonIdx) : url;
+            uint16_t port = colonIdx > 0 ? url.substring(colonIdx + 1).toInt() : 80;
+            renderClient.begin(host, port);
+            Serial.printf("[ws] Connecting to %s:%d\n", host.c_str(), port);
+        }
 }
 
 void handleSerial() {
@@ -506,7 +948,7 @@ void handleSerial() {
 
 // --- Layer Rendering ---
 
-void initScreenState(ScreenState& state, Screen& scr) {
+void initScreenState(ScreenState& state, const Screen& scr) {
     state.textStates.clear();
     state.iconStates.clear();
     state.particleSystems.clear();
@@ -514,7 +956,7 @@ void initScreenState(ScreenState& state, Screen& scr) {
     state.startTime = millis();
     state.inited = true;
 
-    for (auto& layer : scr.layers) {
+    for (const auto& layer : scr.layers) {
         if (layer.type == LAYER_TEXT || layer.type == LAYER_CLOCK) {
             state.textStates.push_back(TextState());
         }
@@ -559,7 +1001,7 @@ static float evaluateTween(const Layer::Tween& tw, uint32_t elapsed) {
 }
 
 static void applyTweens(Layer& layer, uint32_t elapsed) {
-    for (auto& tw : layer.tweens) {
+    for (const auto& tw : layer.tweens) {
         float val = evaluateTween(tw, elapsed);
         if (tw.prop == "x") layer.x = (int16_t)val;
         else if (tw.prop == "y") layer.y = (int16_t)val;
@@ -705,7 +1147,17 @@ void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data) {
                 }
             }
             ts.resolved = buf;
-            display.drawNativeText(ts.resolved, layer.x, layer.y, layer.color, layer.native_spacing, layer.native_large);
+            int16_t clockX = layer.x;
+            if (layer.align == "center") {
+                int16_t tw = display.nativeTextWidth(ts.resolved, layer.native_spacing, layer.native_large);
+                int16_t area = layer.align_width > 0 ? layer.align_width : (MATRIX_WIDTH - layer.x);
+                clockX = layer.x + (area - tw) / 2;
+            } else if (layer.align == "right") {
+                int16_t tw = display.nativeTextWidth(ts.resolved, layer.native_spacing, layer.native_large);
+                int16_t area = layer.align_width > 0 ? layer.align_width : (MATRIX_WIDTH - layer.x);
+                clockX = layer.x + area - tw;
+            }
+            display.drawNativeText(ts.resolved, clockX, layer.y, layer.color, layer.native_spacing, layer.native_large);
             // PM indicator dot for 12h format
             if (layer.clock_format == "12h") {
                 struct tm t2;
@@ -726,18 +1178,23 @@ void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data) {
             } else if (!scr.data_url.isEmpty() && !data.isNull()) {
                 text = configMgr.resolvePlaceholders(layer.label, data);
             }
-            display.drawNativeText(text, layer.x, layer.y, layer.color, layer.native_spacing, layer.native_large);
+            int16_t natX = layer.x;
+            if (layer.align == "center") {
+                int16_t tw = display.nativeTextWidth(text, layer.native_spacing, layer.native_large);
+                int16_t area = layer.align_width > 0 ? layer.align_width : (MATRIX_WIDTH - layer.x);
+                natX = layer.x + (area - tw) / 2;
+            } else if (layer.align == "right") {
+                int16_t tw = display.nativeTextWidth(text, layer.native_spacing, layer.native_large);
+                int16_t area = layer.align_width > 0 ? layer.align_width : (MATRIX_WIDTH - layer.x);
+                natX = layer.x + area - tw;
+            }
+            display.drawNativeText(text, natX, layer.y, layer.color, layer.native_spacing, layer.native_large);
             break;
         }
 
         case LAYER_GAUGE: {
             float val = 0;
-            if (!layer.value_key.isEmpty()) {
-                val = data[layer.value_key.c_str()].as<float>();
-            }
-            Icon gaugeIcon;
-            gaugeIcon.width = layer.gauge_w;
-            gaugeIcon.height = layer.gauge_h;
+            if (!layer.value_key.isEmpty()) val = data[layer.value_key.c_str()].as<float>();
             drawGauge(display, layer.gauge, layer.gauge_w, layer.gauge_h, layer.range, val, layer.x, layer.y);
             break;
         }
@@ -764,7 +1221,7 @@ void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data) {
                     display.drawPixel(layer.x, row, layer.pixels_color);
                 }
             } else if (layer.pixels_pattern == "dots" && !layer.pixels_points.empty()) {
-                for (auto& pt : layer.pixels_points) {
+                for (const auto& pt : layer.pixels_points) {
                     display.drawPixel(layer.x + pt.first, layer.y + pt.second, layer.pixels_color);
                 }
             }
@@ -812,12 +1269,9 @@ void resetState(ScreenState& state) {
     state.particleSystems.clear();
 }
 
-bool screenHasScrolling(ScreenState& state) {
-    for (auto& ts : state.textStates) {
-        if ((ts.mode == SCROLL_LEFT || ts.mode == SCROLL_BOUNCE) && !ts.completedOnce)
-            return true;
-    }
-    return false;
+bool screenHasScrolling(const ScreenState& state) {
+    return std::any_of(state.textStates.begin(), state.textStates.end(),
+        [](const TextState& ts) { return (ts.mode == SCROLL_LEFT || ts.mode == SCROLL_BOUNCE) && !ts.completedOnce; });
 }
 
 void switchScreen() {
@@ -841,7 +1295,7 @@ void showClock() {
     display.clear();
     char buf[6] = "00:00";
     if (getLocalTime(&t)) snprintf(buf, sizeof(buf), "%02d:%02d", t.tm_hour, t.tm_min);
-    else { uint32_t s = millis()/1000; snprintf(buf, sizeof(buf), "%02lu:%02lu", (s/60)%100, s%60); }
+    else { uint32_t s = millis()/1000; snprintf(buf, sizeof(buf), "%02u:%02u", (unsigned)((s/60)%100), (unsigned)(s%60)); }
     display.drawText(buf, 2, 0, 0x00AAFF);
     display.show();
 }
@@ -870,16 +1324,22 @@ void setup() {
 void loop() {
     handleSerial();
     httpServer.handleClient();
+    renderClient.loop();
+    renderClient.tick(display, configMgr, config);
     uint32_t now = millis();
 
     if (now - lastButtonCheck > BUTTON_CHECK_MS) { checkButtons(); checkLDR(); lastButtonCheck = now; now = millis(); }
     if (now - lastSensorRead > SENSOR_READ_MS) { sensors.read(); lastSensorRead = now; }
 
-    // Config
+    // Config — with exponential backoff on failure
+    static uint32_t configBackoff = CONFIG_POLL_MS; // cppcheck-suppress variableScope
+    static bool lastFetchFailed = false;             // cppcheck-suppress variableScope
     if (!configURL.isEmpty() && WiFi.status() == WL_CONNECTED) {
-        if (!config.valid || now - lastConfigFetch > CONFIG_POLL_MS) {
+        if (!config.valid || now - lastConfigFetch > configBackoff) {
             Config newCfg;
             if (configMgr.fetchConfig(configURL, newCfg)) {
+                configBackoff = CONFIG_POLL_MS; // reset on success
+                lastFetchFailed = false;
                 display.setBrightness(newCfg.brightness);
                 // Apply timezone
                 char tz[16];
@@ -900,10 +1360,32 @@ void loop() {
                 }
             }
             lastConfigFetch = now;
+            if (!config.valid) {
+                // Back off: 30s → 60s → 120s → ... → 5min max
+                configBackoff = min((uint32_t)300000, configBackoff * 2);
+                lastFetchFailed = true;
+            }
         }
     }
 
-    if (!config.valid || config.screens.empty()) { showClock(); delay(500); return; }
+    if (!config.valid || config.screens.empty()) {
+        showClock();
+        // Middle button: scroll IP and config URL so user can find/fix the device
+        if (digitalRead(BUTTON_MID) == LOW) {
+            delay(50);
+            if (digitalRead(BUTTON_MID) == LOW) {
+                if (WiFi.status() == WL_CONNECTED) {
+                    scrollText("IP " + WiFi.localIP().toString(), 0x00FF44);
+                    if (!configURL.isEmpty()) scrollText(configURL, 0xFF8800);
+                } else {
+                    scrollText("NO WIFI", 0xFF0000);
+                    scrollText(wifiSSID, 0xFF4400);
+                }
+            }
+        }
+        delay(500);
+        return;
+    }
 
     // Fetch data
     Screen& scr = config.screens[currentScreen];
@@ -992,7 +1474,7 @@ void loop() {
                     }
 
                     // Draw text (offset by icon width, clipped to not overlap icon)
-                    for (auto& l : n.layers) {
+                    for (const auto& l : n.layers) {
                         if (l.type == LAYER_TEXT) {
                             int16_t textW = display.nativeTextWidth(l.label);
                             int16_t availW = MATRIX_WIDTH - iconW;
@@ -1027,7 +1509,7 @@ void loop() {
                 notifSlideY = -8;
             }
         }
-    } else if ((notifCount > 0 || timer.active) && !notifViewerOpen) {
+    } else if ((notifCount > 0 || timer.active)) { // notifViewerOpen is false here by structure
         // Timer indicator dot
         if (timer.active && !timerPaused) {
             // Breathing dot — speed increases as time runs out
