@@ -5,7 +5,7 @@ Branch: `clearstackification` → `main`
 This session did heavy refactoring across the server, firmware, and HA integration.
 Work through this top to bottom before merging.
 
-**Progress: §0–§5 complete ✅**
+Progress: §0–§5 complete ✅
 
 ---
 
