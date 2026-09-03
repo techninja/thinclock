@@ -13,6 +13,7 @@ import {
   PreviewCache,
 } from './api/lib/device-proxy.js';
 import { handleUpgrade, getConnectedDeviceIP } from './api/lib/ws-render.js';
+import { advertiseMDNS } from './api/lib/mdns.js';
 import { registerRoutes } from './api/routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -132,6 +133,7 @@ app.get(/^\/(rotation|settings|notify|editor)?(\/.*)?$/, (req, res) =>
 
 server.listen(PORT, () => {
   console.log(`\nthinclock server (mode: ${registry.mode})`);
+  advertiseMDNS(PORT);
   console.log(`${'='.repeat(40)}`);
   console.log(`UI:      ${BASE}/`);
   console.log(`API:     ${BASE}/api/config`);

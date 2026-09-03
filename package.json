@@ -22,6 +22,7 @@
     "express": "^5.2.1",
     "hybrids": "^9.1.22",
     "lucide-static": "^1.7.0",
+    "multicast-dns": "^7.2.5",
     "ws": "^8.0.0"
   },
   "type": "module",
