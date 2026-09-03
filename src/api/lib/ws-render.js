@@ -58,7 +58,9 @@ export function handleUpgrade(req, socket, head) {
 }
 
 /** @returns {string|null} */
-export function getConnectedDeviceIP() { return deviceIP; }
+export function getConnectedDeviceIP() {
+  return deviceIP;
+}
 
 /** @param {object} command */
 export function queueRender(command) {

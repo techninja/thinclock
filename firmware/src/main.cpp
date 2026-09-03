@@ -74,10 +74,12 @@ uint32_t lastNavTime = 0;
 // LDR "button" (cover sensor to trigger)
 bool ldrCovered = false;
 uint32_t ldrCoverStart = 0;
-#define LDR_COVER_THRESHOLD 50   // raw analog value considered "covered"
-#define LDR_COVER_MIN_MS 200     // must be covered at least this long
-#define LDR_COOLDOWN_MS 1000     // cooldown after trigger
+#define LDR_COVER_MIN_MS 200      // must be covered at least this long
+#define LDR_COOLDOWN_MS 1000      // cooldown after trigger
+#define LDR_AMBIENT_MIN 80        // baseline must be at least this to arm
+#define LDR_COVER_RATIO 0.35f     // reading must drop to this fraction of baseline
 uint32_t lastLdrTrigger = 0;
+uint16_t ldrBaseline = 0;         // rolling ambient baseline
 bool timerPaused = false;
 uint32_t timerPausedRemaining = 0;
 
@@ -136,7 +138,14 @@ void checkLDR() {
     uint16_t ldr = analogRead(LDR_PIN);
     uint32_t now = millis();
 
-    if (ldr < LDR_COVER_THRESHOLD) {
+    // Update rolling baseline when not covered (slow decay toward ambient)
+    if (!ldrCovered) ldrBaseline = ldrBaseline ? (ldrBaseline * 15 + ldr) / 16 : ldr;
+
+    // Disarm entirely when ambient is too dark to distinguish a cover
+    bool armed = ldrBaseline >= LDR_AMBIENT_MIN;
+    bool isCovered = armed && ldr < (uint16_t)(ldrBaseline * LDR_COVER_RATIO);
+
+    if (isCovered) {
         if (!ldrCovered) {
             ldrCovered = true;
             ldrCoverStart = now;

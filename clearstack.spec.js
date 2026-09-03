@@ -11,6 +11,7 @@ export default [
   {
     key: 'firmware',
     name: 'Firmware C++ (cppcheck)',
+    aliases: ['cpp', 'fw'],
     parent: 'lint',
     watchExts: ['.cpp', '.h'],
     watchPaths: ['firmware/src/', 'firmware/include/'],
