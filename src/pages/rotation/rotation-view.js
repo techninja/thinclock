@@ -24,13 +24,14 @@ function scheduleLabel(schedule) {
   return 'Scheduled';
 }
 
-/** Load preview images sequentially, retry 202s */
+/** Load preview images sequentially, retry 202s. Skips already-loaded imgs. */
 async function loadPreviews(host) {
-  const imgs = host.querySelectorAll('img[data-src]');
+  const imgs = [...host.querySelectorAll('img[data-src]')].filter(
+    (i) => !i.src || i.src === window.location.href,
+  );
   for (const img of imgs) {
     if (!host.isConnected) return;
     const src = img.dataset.src;
-    // Try loading — if 202, retry after delay
     for (let attempt = 0; attempt < 10; attempt++) {
       const resp = await fetch(src);
       if (resp.ok && resp.headers.get('content-type')?.includes('image')) {
@@ -41,7 +42,6 @@ async function loadPreviews(host) {
         });
         break;
       }
-      // 202 = generating, wait and retry
       await new Promise((r) => setTimeout(r, 3000));
     }
   }
@@ -69,7 +69,7 @@ function renderItem(screen) {
         data-enabled="${screen.enabled}"
         onclick="${toggleScreen}"
       >
-        ${screen.active ? 'Active' : screen.enabled ? 'On' : 'Off'}
+        ${screen.active ? '▶ In rotation' : screen.enabled ? 'On' : 'Off'}
       </button>
     </li>
   `;
@@ -96,8 +96,8 @@ export default define({
 
       const list = screens.filter((s) => store.ready(s));
       const active = list.filter((s) => s.active);
-      const scheduled = list.filter((s) => !s.active && s.enabled && s.schedule);
-      const inactive = list.filter((s) => !s.active && s.enabled && !s.schedule);
+      const offSchedule = list.filter((s) => !s.active && s.enabled && s.schedule);
+      const enabled = list.filter((s) => !s.active && s.enabled && !s.schedule);
       const disabled = list.filter((s) => !s.enabled);
 
       return html`
@@ -108,19 +108,19 @@ export default define({
           <ul class="screen-list">
             ${active.map(renderItem)}
           </ul>
-          ${scheduled.length
+          ${offSchedule.length
             ? html`
-                <h2>Scheduled</h2>
+                <h2>Scheduled — waiting for time window</h2>
                 <ul class="screen-list">
-                  ${scheduled.map(renderItem)}
+                  ${offSchedule.map(renderItem)}
                 </ul>
               `
             : html``}
-          ${inactive.length
+          ${enabled.length
             ? html`
-                <h2>Available</h2>
+                <h2>Enabled</h2>
                 <ul class="screen-list">
-                  ${inactive.map(renderItem)}
+                  ${enabled.map(renderItem)}
                 </ul>
               `
             : html``}

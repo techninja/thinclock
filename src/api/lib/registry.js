@@ -1,7 +1,23 @@
 import fs from 'fs';
 import path from 'path';
-import { pathToFileURL } from 'url';
+import { pathToFileURL, fileURLToPath } from 'url';
 import { isScheduleActive } from './schedules.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const OVERRIDES_FILE = path.join(__dirname, '..', '..', '..', 'data', 'screen-overrides.json');
+
+function loadOverrides() {
+  try {
+    return JSON.parse(fs.readFileSync(OVERRIDES_FILE, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function saveOverrides(overrides) {
+  fs.mkdirSync(path.dirname(OVERRIDES_FILE), { recursive: true });
+  fs.writeFileSync(OVERRIDES_FILE, JSON.stringify(overrides, null, 2));
+}
 
 export default class ScreenRegistry {
   constructor(options = {}) {
@@ -19,6 +35,7 @@ export default class ScreenRegistry {
   }
 
   async loadDir(dir) {
+    const overrides = loadOverrides();
     const files = fs
       .readdirSync(dir)
       .filter((f) => f.endsWith('.js'))
@@ -33,6 +50,7 @@ export default class ScreenRegistry {
         m.tags = m.tags || [];
         m.schedule = m.schedule || null;
         m.contextAction = m.contextAction || null;
+        if (overrides[m._id] !== undefined) m.enabled = overrides[m._id];
         this.modules.push(m);
         console.log(`  [screen] ${m.enabled ? '✓' : '✗'} ${m.name || file} (${m._id})`);
       } catch (e) {
@@ -80,7 +98,11 @@ export default class ScreenRegistry {
 
   setEnabled(id, enabled) {
     const mod = this.modules.find((m) => m._id === id || m._file === id);
-    if (mod) mod.enabled = enabled;
+    if (!mod) return;
+    mod.enabled = enabled;
+    const overrides = loadOverrides();
+    overrides[mod._id] = enabled;
+    saveOverrides(overrides);
   }
 
   getContextAction(screenIndex) {
