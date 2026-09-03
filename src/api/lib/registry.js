@@ -50,7 +50,9 @@ export default class ScreenRegistry {
         m.tags = m.tags || [];
         m.schedule = m.schedule || null;
         m.contextAction = m.contextAction || null;
-        if (overrides[m._id] !== undefined) m.enabled = overrides[m._id];
+        if (overrides[m._id] !== undefined)
+          m.enabled = overrides[m._id].enabled ?? overrides[m._id];
+        m.pinned = overrides[m._id]?.pinned ?? false;
         this.modules.push(m);
         console.log(`  [screen] ${m.enabled ? '✓' : '✗'} ${m.name || file} (${m._id})`);
       } catch (e) {
@@ -60,9 +62,13 @@ export default class ScreenRegistry {
   }
 
   getActiveModules() {
-    return this.modules
+    const pinned = this.modules.filter(
+      (mod) => mod.enabled && mod.pinned && !this.blocklist.includes(mod._id),
+    );
+    const pinnedIds = new Set(pinned.map((m) => m._id));
+    const rest = this.modules
       .filter((mod) => {
-        if (!mod.enabled) return false;
+        if (!mod.enabled || pinnedIds.has(mod._id)) return false;
         if (this.blocklist.includes(mod._id)) return false;
         if (this.mode === 'manual' && this.allowlist.length > 0) {
           if (!this.allowlist.includes(mod._id)) return false;
@@ -73,7 +79,8 @@ export default class ScreenRegistry {
         return true;
       })
       .sort((a, b) => b.priority - a.priority)
-      .slice(0, this.maxScreens);
+      .slice(0, Math.max(0, this.maxScreens - pinned.length));
+    return [...pinned, ...rest];
   }
 
   registerRoutes(app, config) {
@@ -101,7 +108,16 @@ export default class ScreenRegistry {
     if (!mod) return;
     mod.enabled = enabled;
     const overrides = loadOverrides();
-    overrides[mod._id] = enabled;
+    overrides[mod._id] = { enabled, pinned: mod.pinned ?? false };
+    saveOverrides(overrides);
+  }
+
+  setPinned(id, pinned) {
+    const mod = this.modules.find((m) => m._id === id || m._file === id);
+    if (!mod) return;
+    mod.pinned = pinned;
+    const overrides = loadOverrides();
+    overrides[mod._id] = { enabled: mod.enabled, pinned };
     saveOverrides(overrides);
   }
 
@@ -122,6 +138,7 @@ export default class ScreenRegistry {
       name: m.name || m._file,
       enabled: m.enabled,
       active: activeIds.includes(m._id),
+      pinned: m.pinned ?? false,
       priority: m.priority,
       tags: m.tags,
       schedule: m.schedule,

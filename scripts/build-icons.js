@@ -52,7 +52,8 @@ const ICON_MAP = {
   zap: 'zap',
   box: 'box',
   star: 'star',
-  type: 'text',
+  'calendar-clock': 'calendar-clock',
+  'eye-off': 'eye-off',
 };
 
 /**

@@ -21,6 +21,7 @@ const ScreenModel = {
   name: '',
   enabled: false,
   active: false,
+  pinned: false,
   priority: 0,
   tags: [''],
   schedule: '',

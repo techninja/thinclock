@@ -32,6 +32,14 @@ export function registerRoutes(app, registry, alerts, getDeviceIP, PORT) {
     registry.setEnabled(req.params.id, false);
     res.json({ ok: true });
   });
+  app.post('/api/screens/:id/pin', (req, res) => {
+    registry.setPinned(req.params.id, true);
+    res.json({ ok: true });
+  });
+  app.post('/api/screens/:id/unpin', (req, res) => {
+    registry.setPinned(req.params.id, false);
+    res.json({ ok: true });
+  });
   app.get('/api/active', (req, res) =>
     res.json(
       registry.getActiveModules().map((m, i) => ({
