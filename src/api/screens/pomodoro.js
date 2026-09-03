@@ -140,6 +140,6 @@ export const screen = (_config) => {
   return { duration: 30000, layers };
 };
 
-import { registerPomodoroRoutes } from './pomodoro-routes.js';
+import { registerPomodoroRoutes } from './lib/pomodoro-routes.js';
 export const routes = (app, _config) =>
   registerPomodoroRoutes(app, state, getPhaseColor, getNextPhaseLabel);

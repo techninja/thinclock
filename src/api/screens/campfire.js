@@ -1,5 +1,5 @@
 import { makeIcon } from '../lib/icons.js';
-import { campfireLayers } from './campfire-layers.js';
+import { campfireLayers } from './lib/campfire-layers.js';
 
 export const name = 'Campfire';
 export const enabled = true;

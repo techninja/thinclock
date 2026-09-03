@@ -2,7 +2,7 @@
 
 // Forward declarations from main.cpp
 extern void resetState(ScreenState& state);
-extern void initScreenState(ScreenState& state, Screen& scr);
+extern void initScreenState(ScreenState& state, const Screen& scr);
 extern void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data);
 
 static RenderClient* _instance = nullptr;

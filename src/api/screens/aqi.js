@@ -86,5 +86,5 @@ export const screen = (config) => {
   };
 };
 
-import { registerAqiRoutes } from './aqi-routes.js';
+import { registerAqiRoutes } from './lib/aqi-routes.js';
 export const routes = (app, config) => registerAqiRoutes(app, config, aqiCache);

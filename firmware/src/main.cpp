@@ -54,7 +54,7 @@ uint32_t notifOpenTime = 0;
 #define NOTIF_SCROLL_SPEED 80
 
 // Timer
-Timer timer = {0, 0, 0x00AAFF, false, false};
+Timer timer;
 uint32_t timerBreathPhase = 0;
 
 // Buttons
@@ -993,6 +993,7 @@ static float evaluateTween(const Layer::Tween& tw, uint32_t elapsed) {
 
 static void applyTweens(Layer& layer, uint32_t elapsed) {
     for (const auto& tw : layer.tweens) {
+        float val = evaluateTween(tw, elapsed);
         if (tw.prop == "x") layer.x = (int16_t)val;
         else if (tw.prop == "y") layer.y = (int16_t)val;
         else if (tw.prop == "opacity") layer.opacity = (uint8_t)constrain((int)val, 0, 255);

@@ -3,7 +3,7 @@
  * @module api/screens/weather-icons
  */
 
-import { makeIcon } from '../lib/icons.js';
+import { makeIcon } from '../../lib/icons.js';
 
 export const weatherIcons = {
   weather_sun: {

@@ -28,6 +28,7 @@ npm run dev
 ```
 
 **Check:**
+
 - [ ] Server starts without errors
 - [ ] All screens load — `Loading screens:` lists expected count
 - [ ] HA adapter connects — `[ha] Authenticated` and entity count logged
@@ -51,6 +52,7 @@ npm run build
 ```
 
 **Check:**
+
 - [ ] Compiles without errors
 - [ ] No new warnings beyond what existed before (cppcheck already validated this)
 - [ ] Flash size still reasonable (was 87.2% last known good)
@@ -68,6 +70,7 @@ npm run monitor
 ```
 
 **Check:**
+
 - [ ] Device boots, shows `BOOT` then `WIFI` on display
 - [ ] Connects to WiFi, scrolls IP in green
 - [ ] `[mdns] thinclock.local` logged
@@ -88,6 +91,7 @@ these are correct C++ but worth confirming nothing regressed in rendering behavi
 Open `http://thinclock.local` in a phone browser.
 
 **Check:**
+
 - [ ] Index page loads with correct IP and config status
 - [ ] WiFi SSID displays correctly including emoji (🐾)
 - [ ] Config URL field pre-filled correctly
@@ -101,6 +105,7 @@ Open `http://thinclock.local` in a phone browser.
 With both server and device running:
 
 **Check:**
+
 - [ ] Live preview WebSocket connects: `[ws/device] connected` in server logs
 - [ ] `GET http://localhost:3232/api/device/info` proxies correctly
 - [ ] `GET http://localhost:3232/api/device/sensors` proxies correctly
@@ -114,6 +119,7 @@ With both server and device running:
 Open `http://localhost:3232` in browser.
 
 **Check:**
+
 - [ ] Dashboard loads, live preview shows device framebuffer
 - [ ] Device info section populates (IP, uptime, temp, humidity)
 - [ ] Rotation page loads, screen list renders
@@ -128,6 +134,7 @@ Open `http://localhost:3232` in browser.
 ## 7. HA Integration (via SSH to Yellow)
 
 SSH setup first:
+
 ```bash
 ssh-copy-id root@homeassistant.local
 ```
@@ -140,6 +147,7 @@ ssh root@homeassistant.local "ha core restart"
 ```
 
 **Check:**
+
 - [ ] HA restarts without errors
 - [ ] Navigate to Settings → Integrations
 - [ ] "New device discovered: ThinClock" notification appears (zeroconf)
@@ -161,6 +169,7 @@ ssh root@homeassistant.local "ha core restart"
 ### 7b. Clean up Awtrix cruft
 
 While in HA, delete the old Awtrix entities:
+
 - `input_button.push_awtrix_app`
 - `input_boolean.test_notify`
 - `input_boolean.awtrix_2`
@@ -180,6 +189,7 @@ ssh root@homeassistant.local "ha supervisor reload"
 ```
 
 **Check:**
+
 - [ ] Add-on appears in HA under Settings → Add-ons → Local add-ons
 - [ ] Configure options (device IP, timezone, HA token auto-wired)
 - [ ] Start add-on — check logs for server startup output
@@ -191,6 +201,7 @@ ssh root@homeassistant.local "ha supervisor reload"
 **Known risk:** The `Dockerfile` copies from repo root — when sideloading, the build context
 is `/addons/thinclock/` not the repo root, so `COPY src/` will fail. The Dockerfile needs
 the server source present. Options:
+
 - Copy `src/`, `package.json`, `package-lock.json` alongside the addon files, OR
 - Build and push a Docker image and reference it in `config.yaml`
 

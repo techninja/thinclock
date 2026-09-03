@@ -1,5 +1,5 @@
-import { weatherIcons } from './weather-icons.js';
-import { weatherParticles, heatShimmer } from './weather-particles.js';
+import { weatherIcons } from './lib/weather-icons.js';
+import { weatherParticles, heatShimmer } from './lib/weather-particles.js';
 
 export const name = 'Weather';
 export const enabled = true;
