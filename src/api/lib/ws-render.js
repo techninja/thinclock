@@ -4,20 +4,50 @@
  */
 
 import { WebSocketServer } from 'ws';
+import { isApproved } from './device-registry.js';
 
 let deviceWs = null;
 let deviceIP = null;
 let currentJob = null;
 let jobFrames = [];
 const renderQueue = [];
+const pendingDevices = new Map(); // ip → ws, for unapproved connections
 
 export const wssBrowser = new WebSocketServer({ noServer: true });
 export const wssDevice = new WebSocketServer({ noServer: true });
 
 wssDevice.on('connection', (ws, req) => {
-  deviceIP = req.socket.remoteAddress?.replace('::ffff:', '') || null;
-  console.log(`[ws/device] connected ${deviceIP}`);
+  const ip = req.socket.remoteAddress?.replace('::ffff:', '') || null;
+  console.log(`[ws/device] connected ${ip}`);
+
+  if (!isApproved(ip)) {
+    console.log(`[ws/device] ${ip} not approved — sending pending notification`);
+    pendingDevices.set(ip, ws);
+    // Tell the device to show a "waiting for approval" message
+    ws.send(JSON.stringify({
+      type: 'notify',
+      text: 'Add in HA',
+      color: 'FF8800',
+      beep: 'none',
+    }));
+    ws.on('close', () => pendingDevices.delete(ip));
+    return;
+  }
+
+  _connectDevice(ws, ip);
+});
+
+export function approveAndConnect(ip) {
+  const ws = pendingDevices.get(ip);
+  if (ws && ws.readyState === 1) {
+    pendingDevices.delete(ip);
+    _connectDevice(ws, ip);
+  }
+}
+
+function _connectDevice(ws, ip) {
   deviceWs = ws;
+  deviceIP = ip;
   ws.on('message', (data, isBinary) => {
     if (isBinary) {
       if (currentJob) {
@@ -42,7 +72,7 @@ wssDevice.on('connection', (ws, req) => {
     deviceIP = null;
     if (currentJob) failJob('disconnected');
   });
-});
+}
 
 wssBrowser.on('connection', () => {});
 

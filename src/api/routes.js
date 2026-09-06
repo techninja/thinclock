@@ -5,12 +5,9 @@
 
 import http from 'http';
 import { getSchedules, getSchedule, setSchedule, deleteSchedule } from './lib/schedules.js';
-import {
-  listCustomScreens,
-  getCustomScreen,
-  saveCustomScreen,
-  deleteCustomScreen,
-} from './lib/custom-screens.js';
+import { listCustomScreens, getCustomScreen, saveCustomScreen, deleteCustomScreen } from './lib/custom-screens.js';
+import { approveDevice, removeDevice, listDevices } from './lib/device-registry.js';
+import { approveAndConnect } from './lib/ws-render.js';
 
 /**
  * Register all API routes on the express app.
@@ -20,7 +17,7 @@ import {
  * @param {Function} getDeviceIP
  * @param {number} PORT
  */
-export function registerRoutes(app, registry, alerts, getDeviceIP, PORT) {
+export function registerRoutes(app, registry, alerts, getDeviceIP, PORT, haAdapter) {
   let paused = false;
 
   app.get('/api/screens', (req, res) => res.json(registry.list()));
@@ -51,6 +48,19 @@ export function registerRoutes(app, registry, alerts, getDeviceIP, PORT) {
     ),
   );
   app.get('/api/device-ip', (req, res) => res.json({ ip: getDeviceIP() }));
+
+  // Device registry
+  app.get('/api/devices', (req, res) => res.json(listDevices()));
+  app.post('/api/devices/:ip/approve', (req, res) => {
+    const ip = decodeURIComponent(req.params.ip);
+    approveDevice(ip, req.body.name || '');
+    approveAndConnect(ip);
+    res.json({ ok: true });
+  });
+  app.delete('/api/devices/:ip', (req, res) => {
+    removeDevice(decodeURIComponent(req.params.ip));
+    res.json({ ok: true });
+  });
 
   app.get('/api/schedules', (req, res) => res.json(getSchedules()));
   app.get('/api/schedules/:name', (req, res) => {
@@ -88,6 +98,19 @@ export function registerRoutes(app, registry, alerts, getDeviceIP, PORT) {
   app.post('/api/event', (req, res) => {
     const { event, screen } = req.body;
     console.log(`[event] button=${event} screen=${screen}`);
+    const active = registry.getActiveModules();
+    const mod = active[screen];
+    const isNav = event === 'screen_changed' || event === 'left' || event === 'right' || event === 'left_long' || event === 'right_long';
+    if (isNav) {
+      haAdapter?.fireEvent('thinclock_screen_changed', {
+        screen_index: screen,
+        screen_id:   mod?._id   || '',
+        screen_name: mod?.name  || '',
+      });
+    }
+    if (event !== 'screen_changed') {
+      haAdapter?.fireEvent('thinclock_button', { button: event, screen });
+    }
     if (event === 'select' || event === 'select_long') {
       const action = registry.getContextAction(screen);
       if (action === 'pomodoro') {

@@ -97,7 +97,7 @@ export default class ScreenRegistry {
       if (mod.icons) Object.assign(icons, mod.icons);
       if (mod.screen) {
         const scr = typeof mod.screen === 'function' ? mod.screen(config) : mod.screen;
-        screens.push(scr);
+        screens.push({ id: mod._id, name: mod.name || mod._id, ...scr });
       }
     }
     return { screens, icons };

@@ -44,6 +44,7 @@ export default class HomeAssistantAdapter {
 
   _connect() {
     const wsUrl = this.url.replace(/^http/, 'ws') + '/api/websocket';
+    console.log(`  [ha] WS → ${wsUrl}`);
     this.ws = new WebSocket(wsUrl);
 
     this.ws.on('message', (raw) => {
@@ -91,5 +92,11 @@ export default class HomeAssistantAdapter {
 
   async _subscribe() {
     await this._send({ type: 'subscribe_events', event_type: 'state_changed' });
+  }
+
+  fireEvent(eventType, data = {}) {
+    if (!this.ws || this.ws.readyState !== 1) return;
+    const id = this._msgId++;
+    this.ws.send(JSON.stringify({ id, type: 'fire_event', event_type: eventType, event_data: data }));
   }
 }

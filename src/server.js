@@ -3,6 +3,13 @@ import path from 'path';
 import os from 'os';
 import http from 'http';
 import { fileURLToPath } from 'url';
+
+// Prefix all console output with a timestamp
+const _log = console.log.bind(console);
+const _err = console.error.bind(console);
+const ts = () => new Date().toISOString().replace('T',' ').slice(0,19);
+console.log = (...a) => _log(`[${ts()}]`, ...a);
+console.error = (...a) => _err(`[${ts()}]`, ...a);
 import ScreenRegistry from './api/lib/registry.js';
 import AlertEngine from './api/lib/alerts.js';
 import HomeAssistantAdapter from './api/adapters/homeassistant.js';
@@ -14,6 +21,7 @@ import {
 } from './api/lib/device-proxy.js';
 import { handleUpgrade, getConnectedDeviceIP } from './api/lib/ws-render.js';
 import { advertiseMDNS } from './api/lib/mdns.js';
+import { loadRegistry } from './api/lib/device-registry.js';
 import { registerRoutes } from './api/routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,9 +37,9 @@ app.use((req, res, next) => {
 app.use(express.static(__dirname));
 
 const PORT = process.env.PORT || 3232;
-const LOCAL_IP = (() => {
+const LOCAL_IP = process.env.SERVER_HOST || (() => {
   for (const iface of Object.values(os.networkInterfaces()))
-    for (const net of iface) if (net.family === 'IPv4' && !net.internal) return net.address;
+    for (const net of iface) if (net.family === 'IPv4' && !net.internal && !net.address.startsWith('172.')) return net.address;
   return '127.0.0.1';
 })();
 const BASE = `http://${LOCAL_IP}:${PORT}`;
@@ -56,7 +64,8 @@ config.alerts = alerts;
 config.pushAlert = (id, data) => alerts.pushData(id, data);
 
 console.log('\nAdapters:');
-new HomeAssistantAdapter(config).setup(app, config);
+const haAdapter = new HomeAssistantAdapter(config);
+haAdapter.setup(app, config);
 
 const apiRouter = express.Router();
 registry.registerRoutes(apiRouter, config);
@@ -72,6 +81,8 @@ const isNightMode = () =>
   nightHours().includes((new Date().getUTCHours() + config.timezone + 24) % 24);
 const getBrightness = () =>
   isNightMode() ? parseInt(process.env.BRIGHTNESS_NIGHT) || 10 : config.brightness;
+
+app.get('/api/server/info', (req, res) => res.json({ ip: LOCAL_IP, port: PORT, version: '0.1.0' }));
 
 app.get('/api/config', (req, res) => {
   let { screens, icons } = registry.build(app, config);
@@ -99,7 +110,7 @@ app.get('/api/config', (req, res) => {
   });
 });
 
-registerRoutes(app, registry, alerts, getDeviceIP, PORT);
+registerRoutes(app, registry, alerts, getDeviceIP, PORT, haAdapter);
 registerDeviceRoutes(app, getDeviceIP);
 
 const server = http.createServer(app);
@@ -131,9 +142,17 @@ app.get(/^\/(rotation|settings|notify|editor)?(\/.*)?$/, (req, res) =>
   res.sendFile(path.join(__dirname, 'index.html')),
 );
 
+loadRegistry();
+
+// Write real server URL to HA config volume so the integration can read it
+try {
+  const fs = await import('fs');
+  fs.writeFileSync('/config/.thinclock_server', `http://${LOCAL_IP}:${PORT}`);
+} catch (_) { /* not running as add-on */ }
+
 server.listen(PORT, () => {
   console.log(`\nthinclock server (mode: ${registry.mode})`);
-  advertiseMDNS(PORT);
+  advertiseMDNS(PORT, LOCAL_IP);
   console.log(`${'='.repeat(40)}`);
   console.log(`UI:      ${BASE}/`);
   console.log(`API:     ${BASE}/api/config`);
