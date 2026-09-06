@@ -1,3 +1,4 @@
+#include <WiFi.h>
 #include "config_manager.h"
 #include "sensors.h"
 
@@ -189,6 +190,8 @@ bool ConfigManager::fetchConfig(const String& url, Config& cfg) {
     // Screens
     for (JsonObject s : doc["screens"].as<JsonArray>()) {
         Screen scr;
+        scr.id       = s["id"]   | "";
+        scr.name     = s["name"] | "";
         scr.duration = s["duration"] | 5000;
         scr.data_url = s["data_url"] | "";
 

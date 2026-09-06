@@ -1,3 +1,4 @@
+#include <WiFi.h>
 #include "render_client.h"
 
 // Forward declarations from main.cpp

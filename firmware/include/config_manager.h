@@ -1,4 +1,5 @@
 #pragma once
+#include <WiFi.h>
 #include "thinclock.h"
 #include <HTTPClient.h>
 

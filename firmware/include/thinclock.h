@@ -156,6 +156,8 @@ struct Layer {
 // --- Screen ---
 
 struct Screen {
+    String id;
+    String name;
     std::vector<Layer> layers;
     uint32_t duration = 10000;
     String data_url;
