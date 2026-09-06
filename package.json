@@ -7,7 +7,8 @@
     "dev": "node --watch --env-file=.env src/server.js",
     "build": "cd firmware && ~/.platformio/penv/bin/pio run",
     "flash": "cd firmware && ~/.platformio/penv/bin/pio run -t upload",
-    "erase": "cd firmware && python3 ~/.platformio/packages/tool-esptoolpy/esptool.py --port ${PORT:-/dev/cu.usbserial-204310} erase_flash",
+    "flash:watch": "cd firmware && ~/.platformio/penv/bin/pio run -t upload && ~/.platformio/penv/bin/pio device monitor --baud 115200",
+    "erase": "cd firmware && ~/.platformio/penv/bin/pio run -t erase",
     "flash:force": "npm run erase && npm run flash",
     "monitor": "cd firmware && ~/.platformio/penv/bin/pio device monitor --baud 115200",
     "setup": "npm install && echo 'Copy .env.example to .env and fill in your values'",
@@ -15,9 +16,12 @@
     "postinstall": "node scripts/setup.js",
     "test": "node scripts/test.js",
     "spec": "node scripts/spec.js",
-    "release": "node scripts/release.js"
+    "release": "node scripts/release.js",
+    "sideload": "node scripts/deploy.js local app",
+    "deploy": "node scripts/deploy.js"
   },
   "dependencies": {
+    "bonjour-service": "^1.4.4",
     "dotenv": "^16.0.0",
     "express": "^5.2.1",
     "hybrids": "^9.1.22",
