@@ -9,12 +9,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN
-from .coordinator import ThinClockCoordinator
+from .coordinator import ThinClockDeviceCoordinator
 from .sensor import _device_info
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
-    coordinator: ThinClockCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: ThinClockDeviceCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([ThinClockBrightness(coordinator, entry)])
 
 
@@ -27,9 +27,9 @@ class ThinClockBrightness(CoordinatorEntity, NumberEntity):
     _attr_native_step = 1
     _attr_mode = NumberMode.SLIDER
 
-    def __init__(self, coordinator: ThinClockCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: ThinClockDeviceCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
-        self._url = entry.data["url"]
+        self._url = entry.data["server_url"]
         self._attr_unique_id = f"{entry.entry_id}_brightness"
         self._attr_device_info = _device_info(entry, coordinator)
 
@@ -40,9 +40,12 @@ class ThinClockBrightness(CoordinatorEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         from homeassistant.helpers.aiohttp_client import async_get_clientsession
+        ip = self.coordinator.data.get("info", {}).get("ip") if self.coordinator.data else None
+        if not ip:
+            return
         session = async_get_clientsession(self.hass)
         async with session.post(
-            f"{self._url}/api/device/display",
+            f"http://{ip}/display",
             json={"brightness": int(value)},
             timeout=aiohttp.ClientTimeout(total=5),
         ):

@@ -10,7 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN
-from .coordinator import ThinClockCoordinator
+from .coordinator import ThinClockDeviceCoordinator
 from .sensor import _device_info
 
 BUTTONS = [
@@ -21,7 +21,7 @@ BUTTONS = [
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
-    coordinator: ThinClockCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: ThinClockDeviceCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(ThinClockButton(coordinator, entry, key, name, icon, event)
                        for key, name, icon, event in BUTTONS)
 
@@ -31,7 +31,7 @@ class ThinClockButton(CoordinatorEntity, ButtonEntity):
 
     def __init__(self, coordinator, entry, key, name, icon, event):
         super().__init__(coordinator)
-        self._url = entry.data["url"]
+        self._url = entry.data["server_url"]
         self._event = event
         self._attr_name = name
         self._attr_icon = icon
@@ -40,9 +40,12 @@ class ThinClockButton(CoordinatorEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         session = async_get_clientsession(self.hass)
+        ip = self.coordinator.data.get("info", {}).get("ip") if self.coordinator.data else None
+        if not ip:
+            return
         async with session.post(
-            f"{self._url}/api/event",
-            json={"event": self._event, "screen": 0},
+            f"http://{ip}/button",
+            json={"button": self._event},
             timeout=aiohttp.ClientTimeout(total=5),
         ):
             pass
