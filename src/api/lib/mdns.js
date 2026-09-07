@@ -1,5 +1,3 @@
-import Bonjour from 'bonjour-service';
-
 /** @param {number} port */
 export function advertiseMDNS(port, host) {
   // Server no longer advertises via mDNS — devices are paired by HA pushing config URL at confirm time

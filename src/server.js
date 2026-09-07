@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 // Prefix all console output with a timestamp
 const _log = console.log.bind(console);
 const _err = console.error.bind(console);
-const ts = () => new Date().toISOString().replace('T',' ').slice(0,19);
+const ts = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 console.log = (...a) => _log(`[${ts()}]`, ...a);
 console.error = (...a) => _err(`[${ts()}]`, ...a);
 import ScreenRegistry from './api/lib/registry.js';
@@ -37,11 +37,15 @@ app.use((req, res, next) => {
 app.use(express.static(__dirname));
 
 const PORT = process.env.PORT || 3232;
-const LOCAL_IP = process.env.SERVER_HOST || (() => {
-  for (const iface of Object.values(os.networkInterfaces()))
-    for (const net of iface) if (net.family === 'IPv4' && !net.internal && !net.address.startsWith('172.')) return net.address;
-  return '127.0.0.1';
-})();
+const LOCAL_IP =
+  process.env.SERVER_HOST ||
+  (() => {
+    for (const iface of Object.values(os.networkInterfaces()))
+      for (const net of iface)
+        if (net.family === 'IPv4' && !net.internal && !net.address.startsWith('172.'))
+          return net.address;
+    return '127.0.0.1';
+  })();
 const BASE = `http://${LOCAL_IP}:${PORT}`;
 const getDeviceIP = () => getConnectedDeviceIP() || process.env.DEVICE_IP || null;
 
@@ -144,11 +148,15 @@ app.get(/^\/(rotation|settings|notify|editor)?(\/.*)?$/, (req, res) =>
 
 loadRegistry();
 
+loadRegistry();
+
 // Write real server URL to HA config volume so the integration can read it
 try {
   const fs = await import('fs');
   fs.writeFileSync('/config/.thinclock_server', `http://${LOCAL_IP}:${PORT}`);
-} catch (_) { /* not running as add-on */ }
+} catch (_) {
+  /* not running as add-on */
+}
 
 server.listen(PORT, () => {
   console.log(`\nthinclock server (mode: ${registry.mode})`);

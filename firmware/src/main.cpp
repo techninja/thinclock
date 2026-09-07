@@ -112,8 +112,8 @@ void loop() {
     if (now - lastSensorRead  > SENSOR_READ_MS)  { sensors.read(); lastSensorRead = now; }
 
     // Config fetch with exponential backoff
-    static uint32_t configBackoff = CONFIG_POLL_MS;
-    static uint8_t  failCount = 0;
+    static uint32_t configBackoff = CONFIG_POLL_MS; // cppcheck-suppress variableScope
+    static uint8_t  failCount = 0;                  // cppcheck-suppress variableScope
     if (!configURL.isEmpty() && WiFi.status() == WL_CONNECTED) {
         if (!config.valid || now - lastConfigFetch > configBackoff) {
             Config newCfg;
@@ -125,6 +125,18 @@ void loop() {
                 bool wasInvalid = !config.valid; config = newCfg;
                 if (currentScreen >= (int)config.screens.size() || wasInvalid) {
                     currentScreen = 0; lastScreenSwitch = now; resetState(currentState);
+                }
+                if (wasInvalid) {
+                    // Parse host:port from configURL and connect WebSocket
+                    String url = configURL;
+                    url.replace("http://", ""); url.replace("https://", "");
+                    int slash = url.indexOf('/');
+                    if (slash > 0) url = url.substring(0, slash);
+                    int colon = url.lastIndexOf(':');
+                    String host = colon > 0 ? url.substring(0, colon) : url;
+                    uint16_t port = colon > 0 ? url.substring(colon + 1).toInt() : 80;
+                    renderClient.begin(host, port);
+                    Serial.printf("[ws] connecting to %s:%d\n", host.c_str(), port);
                 }
             }
             lastConfigFetch = now;

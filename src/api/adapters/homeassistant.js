@@ -97,6 +97,8 @@ export default class HomeAssistantAdapter {
   fireEvent(eventType, data = {}) {
     if (!this.ws || this.ws.readyState !== 1) return;
     const id = this._msgId++;
-    this.ws.send(JSON.stringify({ id, type: 'fire_event', event_type: eventType, event_data: data }));
+    this.ws.send(
+      JSON.stringify({ id, type: 'fire_event', event_type: eventType, event_data: data }),
+    );
   }
 }

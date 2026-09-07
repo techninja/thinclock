@@ -12,11 +12,17 @@ let registry = {};
 export function loadRegistry() {
   try {
     if (existsSync(REGISTRY_PATH)) registry = JSON.parse(readFileSync(REGISTRY_PATH, 'utf8'));
-  } catch { registry = {}; }
+  } catch {
+    registry = {};
+  }
 }
 
 function save() {
-  try { writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2)); } catch { /* /data may not exist in dev */ }
+  try {
+    writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2));
+  } catch {
+    /* /data may not exist in dev */
+  }
 }
 
 export function isApproved(ip) {

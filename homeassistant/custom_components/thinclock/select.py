@@ -30,6 +30,15 @@ class ThinClockScreenSelect(CoordinatorEntity, SelectEntity):
         self._attr_device_info = _device_info(entry, coordinator)
 
     @property
+    def entity_picture(self) -> str | None:
+        data = self.coordinator.data or {}
+        status = data.get("status", {}) or {}
+        screen_id = status.get("screen_id", "")
+        if screen_id:
+            return f"{self._url}/api/preview/{screen_id}.gif"
+        return None
+
+    @property
     def options(self) -> list[str]:
         screens = self.coordinator.data.get("config_screens", []) if self.coordinator.data else []
         return [s["name"] for s in screens if isinstance(s, dict) and s.get("name")]

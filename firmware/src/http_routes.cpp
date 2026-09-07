@@ -3,12 +3,10 @@
 #include "setup_page.h"
 #include "screens.h"
 #include "sensors.h"
-#include "gif_encoder.h"
 #include "thinclock.h"
 #include "buttons.h"
 #include <ArduinoJson.h>
 #include <Preferences.h>
-#include <WiFi.h>
 
 extern Config       config;
 extern ConfigManager configMgr;
@@ -19,7 +17,7 @@ extern String       wifiSSID, configURL;
 extern bool         wifiBadPassword;
 extern std::vector<ScannedNet> scannedNets;
 extern int          currentScreen;
-extern uint32_t     lastConfigFetch;
+extern uint32_t     lastConfigFetch, lastScreenSwitch;
 extern String       lastButtonEvent;
 extern Notification notifications[];
 extern int          notifCount;
@@ -27,24 +25,10 @@ extern bool         notifViewerOpen;
 extern Timer        timer;
 extern bool         timerPaused;
 extern uint32_t     timerPausedRemaining;
+extern ScreenState  currentState;
 
 // -----------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------
-
-static void unzigzag(const uint8_t* fb, uint8_t* out) {
-    for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
-        for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
-            uint8_t physX = (y % 2 == 0) ? x : (MATRIX_WIDTH - 1 - x);
-            uint16_t src = (y * MATRIX_WIDTH + physX) * 3;
-            uint16_t dst = (y * MATRIX_WIDTH + x) * 3;
-            out[dst] = fb[src]; out[dst+1] = fb[src+1]; out[dst+2] = fb[src+2];
-        }
-    }
-}
-
-// -----------------------------------------------------------------------
-// Route handlers
+// JSON API handlers
 // -----------------------------------------------------------------------
 
 static void handleSensors() {
@@ -167,183 +151,24 @@ static void handleBeep() {
     httpServer.send(200, "application/json", "{\"ok\":true}");
 }
 
-static void handleFramebuffer() {
-    static uint8_t linear[NUM_LEDS * 3];
-    unzigzag(display.getFramebuffer(), linear);
-    WiFiClient client = httpServer.client();
-    client.print("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n");
-    client.printf("Content-Length: %d\r\n", NUM_LEDS * 3);
-    client.print("Cache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n");
-    client.write(linear, NUM_LEDS * 3);
-}
-
-static void handlePreview() {
-    if (!config.valid || config.screens.empty()) { httpServer.send(400, "application/json", "{\"error\":\"no config\"}"); return; }
-    int screenIdx = httpServer.arg("screen").toInt();
-    int frames    = httpServer.arg("frames").toInt();
-    if (screenIdx < 0 || screenIdx >= (int)config.screens.size()) { httpServer.send(400, "application/json", "{\"error\":\"invalid screen\"}"); return; }
-    frames = constrain(frames, 1, 120);
-
-    WiFiClient client = httpServer.client();
-    client.printf("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n"
-                  "X-Frames: %d\r\nX-Frame-Ms: 20\r\nCache-Control: public, max-age=60\r\n"
-                  "Access-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n", NUM_LEDS * 3 * frames, frames);
-
-    static CRGB savedBuf[NUM_LEDS];
-    memcpy(savedBuf, display.getFramebuffer(), sizeof(savedBuf));
-
-    Screen& scr = config.screens[screenIdx];
-    ScreenState st; resetState(st); initScreenState(st, scr);
-    JsonDocument data;
-    if (!scr.data_url.isEmpty()) configMgr.fetchData(scr.data_url, data);
-
-    static uint8_t linear[NUM_LEDS * 3];
-    for (int f = 0; f < frames; f++) {
-        display.clear(); renderScreen(scr, st, data);
-        unzigzag(display.getFramebuffer(), linear);
-        client.write(linear, NUM_LEDS * 3); yield();
-    }
-    memcpy(const_cast<uint8_t*>(display.getFramebuffer()), savedBuf, sizeof(savedBuf));
-}
-
-static void handleRender() {
-    JsonDocument doc;
-    if (deserializeJson(doc, httpServer.arg("plain"))) { httpServer.send(400, "application/json", "{\"error\":\"parse\"}"); return; }
-    int  frames       = constrain((int)(doc["frames"] | 1), 1, 120);
-    bool showOnDevice = doc["display"] | false;
-
-    Screen tmp; tmp.duration = 0; tmp.data_url = doc["data_url"] | "";
-    for (JsonObject l : doc["layers"].as<JsonArray>()) tmp.layers.push_back(configMgr.parseLayer(l, config.scroll_speed));
-    if (doc["icons"].is<JsonObject>()) configMgr.parseIcons(doc["icons"].as<JsonObject>(), config.icons);
-
-    static CRGB savedBuf[NUM_LEDS];
-    memcpy(savedBuf, display.getFramebuffer(), sizeof(savedBuf));
-
-    ScreenState st; resetState(st); initScreenState(st, tmp);
-    JsonDocument data;
-    if (doc["data"].is<JsonObject>()) data = doc["data"];
-
-    WiFiClient client = httpServer.client();
-    client.printf("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n"
-                  "X-Frames: %d\r\nX-Frame-Ms: 20\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
-                  NUM_LEDS * 3 * frames, frames);
-
-    static uint8_t linear[NUM_LEDS * 3];
-    for (int f = 0; f < frames; f++) {
-        display.clear(); renderScreen(tmp, st, data);
-        unzigzag(display.getFramebuffer(), linear);
-        client.write(linear, NUM_LEDS * 3);
-        if (showOnDevice) display.show();
-        yield();
-    }
-    if (!showOnDevice) memcpy(const_cast<uint8_t*>(display.getFramebuffer()), savedBuf, sizeof(savedBuf));
-}
-
-static void renderGif(Screen& scr, ScreenState& st, JsonDocument& data, int frames,
-                      uint8_t scale, uint8_t gap, uint8_t gamma) {
-    static CRGB savedBuf[NUM_LEDS];
-    memcpy(savedBuf, display.getFramebuffer(), sizeof(savedBuf));
-
-    WiFiClient client = httpServer.client();
-    client.print("HTTP/1.1 200 OK\r\nContent-Type: image/gif\r\n"
-                 "Cache-Control: public, max-age=60\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n");
-
-    GifEncoder gif; gif.begin(client, 66, scale, gap, gamma);
-    static uint8_t linear[NUM_LEDS * 3];
-    for (int f = 0; f < frames; f++) {
-        display.clear(); renderScreen(scr, st, data);
-        memset(linear, 0, sizeof(linear));
-        unzigzag(display.getFramebuffer(), linear);
-        gif.addFrame(linear); delay(66); yield();
-    }
-    gif.end();
-    memcpy(const_cast<uint8_t*>(display.getFramebuffer()), savedBuf, sizeof(savedBuf));
-}
-
-static void handleGifGet() {
-    if (!config.valid || config.screens.empty()) { httpServer.send(400, "application/json", "{\"error\":\"no config\"}"); return; }
-    int screenIdx = httpServer.arg("screen").toInt();
-    if (screenIdx < 0 || screenIdx >= (int)config.screens.size()) { httpServer.send(400, "application/json", "{\"error\":\"invalid screen\"}"); return; }
-    int     seconds = constrain(httpServer.arg("seconds").toInt(), 1, 10); if (seconds < 1) seconds = 2;
-    uint8_t scale   = max((uint8_t)1, (uint8_t)httpServer.arg("scale").toInt());
-    uint8_t gap     = httpServer.arg("gap").toInt();
-    uint8_t gamma   = httpServer.arg("gamma").toInt(); if (gamma < 10) gamma = 18;
-
-    Screen& scr = config.screens[screenIdx];
-    ScreenState st; resetState(st); initScreenState(st, scr);
-    JsonDocument data;
-    if (!scr.data_url.isEmpty()) configMgr.fetchData(scr.data_url, data);
-    renderGif(scr, st, data, seconds * 15, scale, gap, gamma);
-}
-
-static void handleGifPost() {
-    JsonDocument doc;
-    if (deserializeJson(doc, httpServer.arg("plain"))) { httpServer.send(400, "application/json", "{\"error\":\"parse\"}"); return; }
-    int     seconds = constrain((int)(doc["seconds"] | 2), 1, 10);
-    uint8_t scale   = max((uint8_t)1, (uint8_t)(doc["scale"] | 1));
-    uint8_t gap     = doc["gap"] | 0;
-    uint8_t gamma   = doc["gamma"] | 18; if (gamma < 10) gamma = 18;
-
-    Screen tmp; tmp.duration = 0; tmp.data_url = doc["data_url"] | "";
-    for (JsonObject l : doc["layers"].as<JsonArray>()) tmp.layers.push_back(configMgr.parseLayer(l, config.scroll_speed));
-    if (doc["icons"].is<JsonObject>()) configMgr.parseIcons(doc["icons"].as<JsonObject>(), config.icons);
-
-    ScreenState st; resetState(st); initScreenState(st, tmp);
-    JsonDocument data;
-    if      (doc["data"].is<JsonObject>())    data = doc["data"];
-    else if (!tmp.data_url.isEmpty())         configMgr.fetchData(tmp.data_url, data);
-    renderGif(tmp, st, data, seconds * 15, scale, gap, gamma);
-}
-
 // -----------------------------------------------------------------------
-// registerHttpRoutes — called from wifi.cpp before httpServer.begin()
+// registerHttpRoutes
 // -----------------------------------------------------------------------
+
+static String portalPage() {
+    return setupPageHTML(wifiSSID, configURL, WiFi.status() != WL_CONNECTED, wifiBadPassword, scannedNets);
+}
 
 void registerHttpRoutes() {
-    // Setup page (both AP and STA modes)
-    httpServer.on("/", HTTP_GET, []() {
-        httpServer.send(200, "text/html; charset=utf-8",
-            setupPageHTML(wifiSSID, configURL, WiFi.status() != WL_CONNECTED, wifiBadPassword, scannedNets));
-    });
-    httpServer.on("/setup", HTTP_POST, []() { handleSetupPost(httpServer, prefs); });
+    httpServer.on("/",                    HTTP_GET,  []() { httpServer.send(200, "text/html; charset=utf-8", portalPage()); });
+    httpServer.on("/setup",               HTTP_POST, []() { handleSetupPost(httpServer, prefs); });
+    httpServer.on("/generate_204",        HTTP_GET,  []() { httpServer.send(200, "text/html; charset=utf-8", portalPage()); });
+    httpServer.on("/gen_204",             HTTP_GET,  []() { httpServer.send(200, "text/html; charset=utf-8", portalPage()); });
+    httpServer.on("/hotspot-detect.html", HTTP_GET,  []() { httpServer.send(200, "text/html; charset=utf-8", portalPage()); });
+    httpServer.on("/connecttest.txt",     HTTP_GET,  []() { httpServer.send(200, "text/html; charset=utf-8", portalPage()); });
+    httpServer.on("/ncsi.txt",            HTTP_GET,  []() { httpServer.send(200, "text/html; charset=utf-8", portalPage()); });
+    httpServer.onNotFound([]() { httpServer.send(200, "text/html; charset=utf-8", portalPage()); });
 
-    // Captive portal detection endpoints
-    // Android probes /generate_204 and expects exactly 204 — a redirect breaks it.
-    // iOS/macOS probe /hotspot-detect.html and expect a non-204 body response.
-    // onNotFound catches everything else (DNS wildcard sends all hosts here).
-    httpServer.on("/generate_204", HTTP_GET, []() {
-        Serial.printf("[portal] /generate_204 at %lums\n", millis());
-        httpServer.send(200, "text/html; charset=utf-8",
-            setupPageHTML(wifiSSID, configURL, WiFi.status() != WL_CONNECTED, wifiBadPassword, scannedNets));
-    });
-    httpServer.on("/gen_204", HTTP_GET, []() {
-        Serial.printf("[portal] /gen_204 at %lums\n", millis());
-        httpServer.send(200, "text/html; charset=utf-8",
-            setupPageHTML(wifiSSID, configURL, WiFi.status() != WL_CONNECTED, wifiBadPassword, scannedNets));
-    });
-    httpServer.on("/hotspot-detect.html",  HTTP_GET, []() {
-        Serial.printf("[portal] /hotspot-detect.html at %lums\n", millis());
-        httpServer.send(200, "text/html; charset=utf-8",
-            setupPageHTML(wifiSSID, configURL, WiFi.status() != WL_CONNECTED, wifiBadPassword, scannedNets));
-    });
-    httpServer.on("/connecttest.txt", HTTP_GET, []() {
-        Serial.printf("[portal] /connecttest.txt at %lums\n", millis());
-        httpServer.send(200, "text/html; charset=utf-8",
-            setupPageHTML(wifiSSID, configURL, WiFi.status() != WL_CONNECTED, wifiBadPassword, scannedNets));
-    });
-    httpServer.on("/ncsi.txt", HTTP_GET, []() {
-        Serial.printf("[portal] /ncsi.txt at %lums\n", millis());
-        httpServer.send(200, "text/html; charset=utf-8",
-            setupPageHTML(wifiSSID, configURL, WiFi.status() != WL_CONNECTED, wifiBadPassword, scannedNets));
-    });
-    httpServer.onNotFound([]() {
-        Serial.printf("[portal] 404->portal host=%s uri=%s at %lums\n",
-            httpServer.hostHeader().c_str(), httpServer.uri().c_str(), millis());
-        httpServer.send(200, "text/html; charset=utf-8",
-            setupPageHTML(wifiSSID, configURL, WiFi.status() != WL_CONNECTED, wifiBadPassword, scannedNets));
-    });
-
-    // Config URL push from HA
     httpServer.on("/config_url", HTTP_POST, []() {
         JsonDocument doc;
         if (deserializeJson(doc, httpServer.arg("plain")) || !doc["config_url"].is<const char*>()) {
@@ -351,12 +176,10 @@ void registerHttpRoutes() {
         }
         configURL = doc["config_url"].as<const char*>();
         prefs.begin("thinclock", false); prefs.putString("config_url", configURL); prefs.end();
-        Serial.printf("[config] URL set: %s\n", configURL.c_str());
         lastConfigFetch = 0;
         httpServer.send(200, "application/json", "{\"ok\":true}");
     });
 
-    // Device endpoints
     httpServer.on("/info",        HTTP_GET,  handleInfo);
     httpServer.on("/sensors",     HTTP_GET,  handleSensors);
     httpServer.on("/status",      HTTP_GET,  handleStatus);
@@ -376,9 +199,7 @@ void registerHttpRoutes() {
         deserializeJson(doc, httpServer.arg("plain"));
         int idx = doc["index"] | -1;
         if (idx >= 0 && idx < (int)config.screens.size()) {
-            currentScreen = idx;
-            lastScreenSwitch = millis();
-            resetState(currentState);
+            currentScreen = idx; lastScreenSwitch = millis(); resetState(currentState);
         }
         httpServer.send(200, "application/json", "{\"ok\":true}");
     });

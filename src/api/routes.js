@@ -5,7 +5,12 @@
 
 import http from 'http';
 import { getSchedules, getSchedule, setSchedule, deleteSchedule } from './lib/schedules.js';
-import { listCustomScreens, getCustomScreen, saveCustomScreen, deleteCustomScreen } from './lib/custom-screens.js';
+import {
+  listCustomScreens,
+  getCustomScreen,
+  saveCustomScreen,
+  deleteCustomScreen,
+} from './lib/custom-screens.js';
 import { approveDevice, removeDevice, listDevices } from './lib/device-registry.js';
 import { approveAndConnect } from './lib/ws-render.js';
 
@@ -100,12 +105,17 @@ export function registerRoutes(app, registry, alerts, getDeviceIP, PORT, haAdapt
     console.log(`[event] button=${event} screen=${screen}`);
     const active = registry.getActiveModules();
     const mod = active[screen];
-    const isNav = event === 'screen_changed' || event === 'left' || event === 'right' || event === 'left_long' || event === 'right_long';
+    const isNav =
+      event === 'screen_changed' ||
+      event === 'left' ||
+      event === 'right' ||
+      event === 'left_long' ||
+      event === 'right_long';
     if (isNav) {
       haAdapter?.fireEvent('thinclock_screen_changed', {
         screen_index: screen,
-        screen_id:   mod?._id   || '',
-        screen_name: mod?.name  || '',
+        screen_id: mod?._id || '',
+        screen_name: mod?.name || '',
       });
     }
     if (event !== 'screen_changed') {

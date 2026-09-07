@@ -11,7 +11,8 @@ let deviceIP = null;
 let currentJob = null;
 let jobFrames = [];
 const renderQueue = [];
-const pendingDevices = new Map(); // ip → ws, for unapproved connections
+const pendingDevices = new Map();
+const frameListeners = new Set();
 
 export const wssBrowser = new WebSocketServer({ noServer: true });
 export const wssDevice = new WebSocketServer({ noServer: true });
@@ -24,12 +25,14 @@ wssDevice.on('connection', (ws, req) => {
     console.log(`[ws/device] ${ip} not approved — sending pending notification`);
     pendingDevices.set(ip, ws);
     // Tell the device to show a "waiting for approval" message
-    ws.send(JSON.stringify({
-      type: 'notify',
-      text: 'Add in HA',
-      color: 'FF8800',
-      beep: 'none',
-    }));
+    ws.send(
+      JSON.stringify({
+        type: 'notify',
+        text: 'Add in HA',
+        color: 'FF8800',
+        beep: 'none',
+      }),
+    );
     ws.on('close', () => pendingDevices.delete(ip));
     return;
   }
@@ -54,7 +57,9 @@ function _connectDevice(ws, ip) {
         jobFrames.push(Buffer.from(data));
         if (jobFrames.length >= currentJob.frames) finishJob();
       } else {
-        for (const c of wssBrowser.clients) if (c.readyState === 1) c.send(data);
+        const buf = Buffer.from(data);
+        for (const c of wssBrowser.clients) if (c.readyState === 1) c.send(buf);
+        for (const fn of frameListeners) fn(buf);
       }
     } else {
       try {
@@ -73,6 +78,8 @@ function _connectDevice(ws, ip) {
     if (currentJob) failJob('disconnected');
   });
 }
+
+export { frameListeners };
 
 wssBrowser.on('connection', () => {});
 
