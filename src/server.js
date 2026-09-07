@@ -70,6 +70,7 @@ config.pushAlert = (id, data) => alerts.pushData(id, data);
 console.log('\nAdapters:');
 const haAdapter = new HomeAssistantAdapter(config);
 haAdapter.setup(app, config);
+config.haAdapter = haAdapter;
 
 const apiRouter = express.Router();
 registry.registerRoutes(apiRouter, config);

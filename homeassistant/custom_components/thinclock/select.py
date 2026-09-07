@@ -48,15 +48,18 @@ class ThinClockScreenSelect(CoordinatorEntity, SelectEntity):
         data = self.coordinator.data or {}
         status = data.get("status", {}) or {}
         screens = data.get("config_screens", [])
+        if not screens:
+            return None
+        # Prefer screen_id match, fall back to index
         screen_id = status.get("screen_id", "")
         if screen_id:
             match = next((s for s in screens if s.get("id") == screen_id), None)
-            if match:
+            if match and match.get("name") in self.options:
                 return match.get("name")
         idx = status.get("screen", 0)
-        if screens and 0 <= idx < len(screens):
+        if 0 <= idx < len(screens) and screens[idx].get("name") in self.options:
             return screens[idx].get("name")
-        return None
+        return self.options[0] if self.options else None
 
     async def async_select_option(self, option: str) -> None:
         from homeassistant.helpers.aiohttp_client import async_get_clientsession
