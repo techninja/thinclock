@@ -4,43 +4,33 @@
  *
  * config:
  *   type: custom:thinclock-card
- *   server_url: http://homeassistant.local:3232   # optional, auto-detected from entity
- *   entity: select.thinclock_current_screen       # optional
+ *   server_url: http://192.168.86.42:3232
+ *   entity: select.thinclock_192_168_86_27_current_screen
  */
 class ThinClockCard extends HTMLElement {
-  set hass(hass) {
-    this._hass = hass;
-    this._render();
-  }
-
   setConfig(config) {
     this._config = config;
-    this.attachShadow({ mode: 'open' });
-    this._render();
+    this._built = false;
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._built) this._build();
+    this._update();
   }
 
   _serverUrl() {
-    if (this._config?.server_url) return this._config.server_url;
-    // Try to read from entity attributes
+    if (this._config?.server_url) return this._config.server_url.replace(/\/$/, '');
     if (this._config?.entity && this._hass) {
-      const state = this._hass.states[this._config.entity];
-      if (state?.attributes?.server_url) return state.attributes.server_url;
+      const s = this._hass.states[this._config.entity];
+      if (s?.attributes?.server_url) return s.attributes.server_url.replace(/\/$/, '');
     }
     return '';
   }
 
-  _render() {
-    if (!this.shadowRoot) return;
-    const url = this._serverUrl();
-    const streamUrl = url ? `${url}/api/device/stream` : '';
-
-    // Current screen name from entity
-    let screenName = '';
-    if (this._config?.entity && this._hass) {
-      const state = this._hass.states[this._config.entity];
-      screenName = state?.state || '';
-    }
-
+  _build() {
+    this._built = true;
+    if (!this.shadowRoot) this.attachShadow({ mode: 'open' });
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
@@ -59,6 +49,11 @@ class ThinClockCard extends HTMLElement {
           height: auto;
           display: block;
         }
+        .no-url {
+          color: #666;
+          padding: 24px;
+          font-size: 0.85em;
+        }
         .footer {
           padding: 8px 12px;
           font-size: 0.85em;
@@ -69,30 +64,51 @@ class ThinClockCard extends HTMLElement {
         }
         .dot {
           width: 8px; height: 8px; border-radius: 50%;
-          background: ${streamUrl ? 'var(--success-color, #4caf50)' : 'var(--error-color, #f44336)'};
+          background: var(--success-color, #4caf50);
           flex-shrink: 0;
         }
       </style>
       <ha-card>
         <div class="stream-wrap">
-          ${streamUrl
-            ? `<img src="${streamUrl}" alt="ThinClock live display">`
-            : `<div style="color:#666;padding:24px;font-size:0.85em">No server_url configured</div>`
-          }
+          <img id="stream" alt="ThinClock live display" style="display:none">
+          <div id="no-url" class="no-url">No server_url configured</div>
         </div>
         <div class="footer">
           <div class="dot"></div>
-          <span>${screenName || 'ThinClock'}</span>
+          <span id="screen-name">ThinClock</span>
         </div>
       </ha-card>
     `;
+    this._img = this.shadowRoot.getElementById('stream');
+    this._noUrl = this.shadowRoot.getElementById('no-url');
+    this._nameEl = this.shadowRoot.getElementById('screen-name');
+  }
+
+  _update() {
+    if (!this._built) return;
+    const url = this._serverUrl();
+    const streamUrl = url ? `${url}/api/device/stream` : '';
+
+    // Only update img src if URL changed — avoids killing the stream
+    if (streamUrl && this._img.src !== streamUrl) {
+      this._img.src = streamUrl;
+      this._img.style.display = '';
+      this._noUrl.style.display = 'none';
+    } else if (!streamUrl) {
+      this._img.style.display = 'none';
+      this._noUrl.style.display = '';
+    }
+
+    // Screen name from entity state
+    let name = 'ThinClock';
+    if (this._config?.entity && this._hass) {
+      const s = this._hass.states[this._config.entity];
+      if (s?.state) name = s.state;
+    }
+    if (this._nameEl.textContent !== name) this._nameEl.textContent = name;
   }
 
   getCardSize() { return 2; }
-
-  static getConfigElement() {
-    return document.createElement('thinclock-card-editor');
-  }
 
   static getStubConfig() {
     return { type: 'custom:thinclock-card', server_url: 'http://homeassistant.local:3232' };

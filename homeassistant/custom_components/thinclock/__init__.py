@@ -14,18 +14,11 @@ PLATFORMS = ["sensor", "select", "number", "button", "event"]
 CARD_URL = "/local/thinclock-card.js"
 
 
-async def _register_lovelace_card(hass: HomeAssistant) -> None:
-    """Persist the card JS in lovelace_resources storage so it survives reloads."""
-    import hashlib
-    from homeassistant.helpers.storage import Store
-    store = Store(hass, 1, "lovelace_resources")
-    data = await store.async_load() or {"items": []}
-    items = data.setdefault("items", [])
-    if not any(i.get("url") == CARD_URL for i in items):
-        card_id = hashlib.md5(CARD_URL.encode()).hexdigest()
-        items.append({"id": card_id, "url": CARD_URL, "type": "module"})
-        await store.async_save(data)
-        _LOGGER.info("[thinclock] registered Lovelace card resource")
+def _register_lovelace_card(hass: HomeAssistant) -> None:
+    """Register card JS with the frontend module loader."""
+    from homeassistant.components.frontend import async_register_extra_js_url
+    async_register_extra_js_url(hass, CARD_URL)
+    _LOGGER.info("[thinclock] registered Lovelace card resource")
 
 
 
@@ -42,7 +35,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Register Lovelace card (once, not per entry)
     if not hass.data[DOMAIN].get('_card_registered'):
-        await _register_lovelace_card(hass)
+        _register_lovelace_card(hass)
         hass.data[DOMAIN]['_card_registered'] = True
 
     @callback
