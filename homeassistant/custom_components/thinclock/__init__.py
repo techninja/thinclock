@@ -17,7 +17,8 @@ CARD_URL = "/local/thinclock-card.js"
 async def _register_lovelace_card(hass: HomeAssistant) -> None:
     """Persist the card JS in lovelace_resources storage so it survives reloads."""
     import hashlib
-    store = hass.helpers.storage.Store(1, "lovelace_resources")
+    from homeassistant.helpers.storage import Store
+    store = Store(hass, 1, "lovelace_resources")
     data = await store.async_load() or {"items": []}
     items = data.setdefault("items", [])
     if not any(i.get("url") == CARD_URL for i in items):
