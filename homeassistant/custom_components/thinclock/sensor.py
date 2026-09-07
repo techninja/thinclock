@@ -5,6 +5,7 @@ from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, Sen
 from homeassistant.const import UnitOfTemperature, PERCENTAGE, LIGHT_LUX
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -44,13 +45,13 @@ class ThinClockSensor(CoordinatorEntity, SensorEntity):
         return val if val else None
 
 
-def _device_info(entry, coordinator):
+def _device_info(entry, coordinator) -> DeviceInfo:
     info = coordinator.data.get("info", {}) if coordinator.data else {}
-    return {
-        "identifiers": {(DOMAIN, entry.entry_id)},
-        "name": f"ThinClock ({entry.data.get('device_ip', '?')})",
-        "manufacturer": "ThinClock",
-        "model": entry.data.get("chip", info.get("chip", "ESP32")),
-        "sw_version": entry.data.get("version") or info.get("version"),
-        "configuration_url": entry.data.get("external_url") or f"http://{entry.data.get('device_ip')}",
-    }
+    return DeviceInfo(
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=f"ThinClock ({entry.data.get('device_ip', '?')})",
+        manufacturer="ThinClock",
+        model=entry.data.get("chip", info.get("chip", "ESP32")),
+        sw_version=entry.data.get("version") or info.get("version"),
+        configuration_url=entry.data.get("external_url") or f"http://{entry.data.get('device_ip')}",
+    )
