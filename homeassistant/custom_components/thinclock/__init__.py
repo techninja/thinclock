@@ -40,7 +40,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     @callback
     def _on_screen_changed(event) -> None:
-        hass.async_create_task(coordinator.async_request_refresh())
+        hass.async_create_task(coordinator.async_refresh())
 
     entry.async_on_unload(
         hass.bus.async_listen('thinclock_screen_changed', _on_screen_changed)
