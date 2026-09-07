@@ -1,10 +1,7 @@
 #include <WiFi.h>
 #include "render_client.h"
 
-// Forward declarations from main.cpp
-extern void resetState(ScreenState& state);
-extern void initScreenState(ScreenState& state, const Screen& scr);
-extern void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data);
+#include "screens.h"
 
 static RenderClient* _instance = nullptr;
 
@@ -54,7 +51,7 @@ void RenderClient::onEvent(WStype_t type, uint8_t* payload, size_t length) {
     }
 }
 
-void RenderClient::startJob(uint8_t* payload, size_t length, ConfigManager& configMgr, Config& config) {
+void RenderClient::startJob(uint8_t* payload, size_t length, ConfigManager& configMgr, AppState& appState) {
     _framesTotal = _data["frames"] | 30;
     _frameDelayMs = _data["frame_ms"] | 66;
     if (_framesTotal > 120) _framesTotal = 120;
@@ -64,10 +61,10 @@ void RenderClient::startJob(uint8_t* payload, size_t length, ConfigManager& conf
     _screen.data_url = _data["data_url"] | "";
 
     for (JsonObject l : _data["layers"].as<JsonArray>()) {
-        _screen.layers.push_back(configMgr.parseLayer(l, config.scroll_speed));
+        _screen.layers.push_back(configMgr.parseLayer(l, appState.config.scroll_speed));
     }
     if (_data["icons"].is<JsonObject>()) {
-        configMgr.parseIcons(_data["icons"].as<JsonObject>(), config.icons);
+        configMgr.parseIcons(_data["icons"].as<JsonObject>(), appState.config.icons);
     }
 
     resetState(_state);
@@ -89,13 +86,13 @@ void RenderClient::startJob(uint8_t* payload, size_t length, ConfigManager& conf
     _ws.sendTXT(msg);
 }
 
-void RenderClient::tick(Display& display, ConfigManager& configMgr, Config& config) {
+void RenderClient::tick(Display& display, ConfigManager& configMgr, AppState& appState) {
     if (!_connected) return;
 
     if (_rendering) {
         // Initialize job on first tick
         if (_framesTotal == 0) {
-            startJob(nullptr, 0, configMgr, config);
+            startJob(nullptr, 0, configMgr, appState);
             if (_screen.layers.empty()) {
                 _rendering = false;
                 _ws.sendTXT("{\"type\":\"error\",\"msg\":\"no layers\"}");
@@ -114,7 +111,7 @@ void RenderClient::tick(Display& display, ConfigManager& configMgr, Config& conf
             memcpy(savedBuf, fb, sizeof(savedBuf));
 
             display.clear();
-            renderScreen(_screen, _state, _data["data"]);
+            renderScreen(appState, _screen, _state, _data["data"]);
 
             // Unzigzag and send frame
             sendFrame(display);

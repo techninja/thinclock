@@ -2,7 +2,6 @@
 #include "tc_wifi.h"
 #include "display.h"
 #include "thinclock.h"
-#include "http_routes.h"
 #include <ESPmDNS.h>
 #include <time.h>
 
@@ -63,7 +62,6 @@ void setupWiFi() {
     dnsServer.start(53, "*", apIP);
     Serial.println("[wifi] DNS server started");
 
-    registerHttpRoutes();
     httpServer.begin();
     Serial.println("[http] server started");
 

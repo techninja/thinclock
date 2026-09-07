@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <DNSServer.h>
+#include <WebServer.h>
 #include <Preferences.h>
 #include <vector>
 #include "setup_page.h"
@@ -14,6 +15,7 @@ extern std::vector<ScannedNet> scannedNets;
 // Shared objects owned by main.cpp
 extern DNSServer   dnsServer;
 extern Preferences prefs;
+extern WebServer   httpServer;
 
 void setupWiFi();
 void loopWiFi();

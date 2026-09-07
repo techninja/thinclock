@@ -4,16 +4,11 @@
 #include "gauge.h"
 #include "particles.h"
 #include "thinclock.h"
-#include "buttons.h"
 #include <time.h>
 #include <algorithm>
 
 extern Display      display;
-extern Config       config;
 extern ConfigManager configMgr;
-extern Timer        timer;
-extern bool         timerPaused;
-extern uint32_t     timerPausedRemaining;
 
 // -----------------------------------------------------------------------
 // State helpers
@@ -45,27 +40,27 @@ bool screenHasScrolling(const ScreenState& state) {
         [](const TextState& ts) { return (ts.mode == SCROLL_LEFT || ts.mode == SCROLL_BOUNCE) && !ts.completedOnce; });
 }
 
-void switchScreen() {
-    prevState      = currentState;
-    prevScreenIdx  = currentScreen;
-    prevScreenData = screenData;
-    currentScreen  = (currentScreen + 1) % config.screens.size();
-    lastScreenSwitch = millis();
-    screenData.clear();
-    lastDataFetch = 0;
-    resetState(currentState);
-    transitioning     = true;
-    transitionProgress = 0;
+void switchScreen(AppState& state) {
+    state.prevState      = state.currentState;
+    state.prevScreenIdx  = state.currentScreen;
+    state.prevScreenData = state.screenData;
+    state.currentScreen  = (state.currentScreen + 1) % state.config.screens.size();
+    state.lastScreenSwitch = millis();
+    state.screenData.clear();
+    state.lastDataFetch = 0;
+    resetState(state.currentState);
+    state.transitioning      = true;
+    state.transitionProgress = 0;
 }
 
-void resetCurrentScreen(bool /*prev*/) {
-    transitioning  = false;
-    prevScreenIdx  = -1;
-    currentScreen  = (currentScreen - 1 + config.screens.size()) % config.screens.size();
-    lastScreenSwitch = millis();
-    screenData.clear();
-    lastDataFetch = 0;
-    resetState(currentState);
+void resetCurrentScreen(AppState& state, bool /*prev*/) {
+    state.transitioning  = false;
+    state.prevScreenIdx  = -1;
+    state.currentScreen  = (state.currentScreen - 1 + state.config.screens.size()) % state.config.screens.size();
+    state.lastScreenSwitch = millis();
+    state.screenData.clear();
+    state.lastDataFetch = 0;
+    resetState(state.currentState);
 }
 
 // -----------------------------------------------------------------------
@@ -103,7 +98,7 @@ static void applyTweens(Layer& layer, uint32_t elapsed) {
 // renderScreen
 // -----------------------------------------------------------------------
 
-void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data) {
+void renderScreen(AppState& appState, Screen& scr, ScreenState& state, const JsonDocument& data) {
     if (!state.inited) initScreenState(state, scr);
 
     uint32_t now = millis();
@@ -130,8 +125,8 @@ void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data) {
         }
 
         case LAYER_ICON: {
-            if (layer.icon_name.isEmpty() || !config.icons.count(layer.icon_name)) break;
-            Icon& icon = config.icons[layer.icon_name];
+            if (layer.icon_name.isEmpty() || !appState.config.icons.count(layer.icon_name)) break;
+            Icon& icon = appState.config.icons[layer.icon_name];
             if (icon.frames.empty()) break;
             IconState& is = state.iconStates[iconIdx++];
             if (icon.fps > 0 && icon.frames.size() > 1) {
@@ -193,8 +188,8 @@ void renderScreen(Screen& scr, ScreenState& state, const JsonDocument& data) {
             TextState& ts = state.textStates[textIdx++];
             char buf[6] = "??:??";
             if (layer.clock_format == "timer") {
-                if (timer.active) {
-                    int32_t rem = timerPaused ? timerPausedRemaining : (int32_t)(timer.endTime - millis());
+                if (appState.timer.active) {
+                    int32_t rem = appState.timerPaused ? appState.timerPausedRemaining : (int32_t)(appState.timer.endTime - millis());
                     if (rem < 0) rem = 0;
                     snprintf(buf, sizeof(buf), "%02d:%02d", rem / 60000, (rem / 1000) % 60);
                 } else snprintf(buf, sizeof(buf), "--:--");

@@ -2,12 +2,7 @@
 #include "buttons.h"
 #include "screens.h"
 #include "config_manager.h"
-#include <WiFi.h>
 #include <HTTPClient.h>
-
-extern Config config;
-extern String configURL;
-extern Notification notifications[MAX_NOTIFICATIONS];
 
 #define NAV_COOLDOWN_MS  500
 #define LONG_PRESS_MS    500
@@ -23,14 +18,12 @@ extern Notification notifications[MAX_NOTIFICATIONS];
 #define LDR_AMBIENT_MIN   80
 #define LDR_COVER_RATIO   0.35f
 
-static bool    btnLeftLast = HIGH, btnMidLast = HIGH, btnRightLast = HIGH;
+static bool     btnLeftLast = HIGH, btnMidLast = HIGH, btnRightLast = HIGH;
 static uint32_t btnLeftDown = 0, btnMidDown = 0, btnRightDown = 0;
-static bool    btnLeftLongFired = false, btnMidLongFired = false, btnRightLongFired = false;
+static bool     btnLeftLongFired = false, btnMidLongFired = false, btnRightLongFired = false;
 static uint32_t lastNavTime = 0;
 
-String lastButtonEvent = "";
-
-static bool    ldrCovered = false;
+static bool     ldrCovered = false;
 static uint32_t ldrCoverStart = 0;
 static uint32_t lastLdrTrigger = 0;
 static uint16_t ldrBaseline = 0;
@@ -38,7 +31,6 @@ static uint16_t ldrBaseline = 0;
 // -----------------------------------------------------------------------
 
 void beepOnce(uint16_t freq, uint16_t duration) {
-    if (!config.allow_beep) return;
     ledcSetup(0, freq, 8);
     ledcAttachPin(BUZZER_PIN, 0);
     ledcWrite(0, 128);
@@ -50,48 +42,51 @@ void beepOnce(uint16_t freq, uint16_t duration) {
 }
 
 void beepTriple() {
-    if (!config.allow_beep) return;
     for (int i = 0; i < 3; i++) { beepOnce(2500, 60); if (i < 2) delay(80); }
 }
 
-void postEvent(const char* event) {
-    if (strcmp(event, "screen_changed") != 0) lastButtonEvent = event;
-    if (config.event_url.isEmpty() || WiFi.status() != WL_CONNECTED) return;
+void postEvent(AppState& state, const char* event) {
+    if (strcmp(event, "screen_changed") != 0) state.lastButtonEvent = event;
+    if (state.config.event_url.isEmpty() || WiFi.status() != WL_CONNECTED) return;
     HTTPClient http;
-    http.begin(config.event_url);
+    http.begin(state.config.event_url);
     http.setTimeout(2000);
     http.addHeader("Content-Type", "application/json");
-    int code = http.POST("{\"event\":\"" + String(event) + "\",\"screen\":" + currentScreen + "}");
-    Serial.printf("[event] %s → %s (%d)\n", event, config.event_url.c_str(), code);
+    int code = http.POST("{\"event\":\"" + String(event) + "\",\"screen\":" + state.currentScreen + "}");
+    Serial.printf("[event] %s → %s (%d)\n", event, state.config.event_url.c_str(), code);
     http.end();
 }
 
-void simulateButton(const String& btn) {
-    if (btn == "left")        { beepOnce(BEEP_SHORT_FREQ, BEEP_SHORT_DUR); navigatePrev(); postEvent("left"); }
-    else if (btn == "right")  { beepOnce(BEEP_SHORT_FREQ, BEEP_SHORT_DUR); navigateNext(); postEvent("right"); }
+void simulateButton(AppState& state, const String& btn) {
+    if (btn == "left")        { beepOnce(BEEP_SHORT_FREQ, BEEP_SHORT_DUR); navigatePrev(state); postEvent(state, "left"); }
+    else if (btn == "right")  { beepOnce(BEEP_SHORT_FREQ, BEEP_SHORT_DUR); navigateNext(state); postEvent(state, "right"); }
     else if (btn == "select") {
         beepOnce(BEEP_SHORT_FREQ, BEEP_SHORT_DUR);
-        if (notifCount > 0 || timer.active) {
-            notifViewerOpen = !notifViewerOpen;
-            if (notifViewerOpen) { notifViewerIdx = timer.active ? -1 : 0; notifSlideY = -8; notifScrollX = 0; notifOpenTime = millis(); }
-        } else { lastConfigFetch = 0; }
-        postEvent("select");
+        if (state.notifCount > 0 || state.timer.active) {
+            state.notifViewerOpen = !state.notifViewerOpen;
+            if (state.notifViewerOpen) {
+                state.notifViewerIdx = state.timer.active ? -1 : 0;
+                state.notifSlideY = -8; state.notifScrollX = 0;
+                state.notifOpenTime = millis();
+            }
+        } else { state.lastConfigFetch = 0; }
+        postEvent(state, "select");
     }
 }
 
-void navigatePrev() {
-    if (config.screens.empty() || millis() - lastNavTime < NAV_COOLDOWN_MS) return;
+void navigatePrev(AppState& state) {
+    if (state.config.screens.empty() || millis() - lastNavTime < NAV_COOLDOWN_MS) return;
     lastNavTime = millis();
-    resetCurrentScreen(true);
+    resetCurrentScreen(state, true);
 }
 
-void navigateNext() {
-    if (config.screens.empty() || millis() - lastNavTime < NAV_COOLDOWN_MS) return;
+void navigateNext(AppState& state) {
+    if (state.config.screens.empty() || millis() - lastNavTime < NAV_COOLDOWN_MS) return;
     lastNavTime = millis();
-    switchScreen();
+    switchScreen(state);
 }
 
-void checkLDR() {
+void checkLDR(AppState& state) {
     uint16_t ldr = analogRead(LDR_PIN);
     uint32_t now = millis();
     if (!ldrCovered) ldrBaseline = ldrBaseline ? (ldrBaseline * 15 + ldr) / 16 : ldr;
@@ -102,21 +97,21 @@ void checkLDR() {
         if (!ldrCovered) { ldrCovered = true; ldrCoverStart = now; }
         else if (now - ldrCoverStart >= LDR_COVER_MIN_MS && now - lastLdrTrigger >= LDR_COOLDOWN_MS) {
             lastLdrTrigger = now; ldrCovered = false;
-            if (timer.active && !timer.fired) {
-                if (timerPaused) {
-                    timer.endTime = millis() + timerPausedRemaining;
-                    timerPaused = false; beepOnce(1800, 40);
+            if (state.timer.active && !state.timer.fired) {
+                if (state.timerPaused) {
+                    state.timer.endTime = millis() + state.timerPausedRemaining;
+                    state.timerPaused = false; beepOnce(1800, 40);
                 } else {
-                    timerPausedRemaining = timer.endTime - millis();
-                    timerPaused = true; beepOnce(1200, 40);
+                    state.timerPausedRemaining = state.timer.endTime - millis();
+                    state.timerPaused = true; beepOnce(1200, 40);
                 }
             }
-            postEvent("ldr_cover");
+            postEvent(state, "ldr_cover");
         }
     } else { ldrCovered = false; }
 }
 
-void checkButtons() {
+void checkButtons(AppState& state) {
     bool l = digitalRead(BUTTON_LEFT);
     bool m = digitalRead(BUTTON_MID);
     bool r = digitalRead(BUTTON_RIGHT);
@@ -125,59 +120,59 @@ void checkButtons() {
     // --- LEFT ---
     if (l == LOW && btnLeftLast == HIGH) { btnLeftDown = now; btnLeftLongFired = false; beepOnce(BEEP_DOWN_FREQ, BEEP_DOWN_DUR); }
     if (l == LOW && !btnLeftLongFired && now - btnLeftDown >= LONG_PRESS_MS) {
-        btnLeftLongFired = true; beepOnce(BEEP_LONG_FREQ, BEEP_LONG_DUR); postEvent("left_long");
+        btnLeftLongFired = true; beepOnce(BEEP_LONG_FREQ, BEEP_LONG_DUR); postEvent(state, "left_long");
     }
     if (l == HIGH && btnLeftLast == LOW && !btnLeftLongFired) {
         beepOnce(BEEP_SHORT_FREQ, BEEP_SHORT_DUR);
-        if (notifViewerOpen) {
-            if (notifViewerIdx > 0) notifViewerIdx--;
-            else if (notifViewerIdx == 0 && timer.active) notifViewerIdx = -1;
-            else if (notifViewerIdx == -1 && timer.fired) { timer.active = false; timer.fired = false; notifViewerOpen = false; }
-            notifSlideY = -8; notifScrollX = 0; notifOpenTime = now;
-        } else if (config.buttons == "navigate") navigatePrev();
-        postEvent("left");
+        if (state.notifViewerOpen) {
+            if (state.notifViewerIdx > 0) state.notifViewerIdx--;
+            else if (state.notifViewerIdx == 0 && state.timer.active) state.notifViewerIdx = -1;
+            else if (state.notifViewerIdx == -1 && state.timer.fired) { state.timer.active = false; state.timer.fired = false; state.notifViewerOpen = false; }
+            state.notifSlideY = -8; state.notifScrollX = 0; state.notifOpenTime = now;
+        } else if (state.config.buttons == "navigate") navigatePrev(state);
+        postEvent(state, "left");
     }
 
     // --- MIDDLE ---
     if (m == LOW && btnMidLast == HIGH) { btnMidDown = now; btnMidLongFired = false; beepOnce(BEEP_DOWN_FREQ, BEEP_DOWN_DUR); }
     if (m == LOW && !btnMidLongFired && now - btnMidDown >= LONG_PRESS_MS) {
         btnMidLongFired = true; beepOnce(BEEP_LONG_FREQ, BEEP_LONG_DUR);
-        if (notifViewerOpen && notifViewerIdx == -1 && timer.active) {
-            timer.active = false; timer.fired = false; timerPaused = false;
-            notifViewerOpen = false; notifSlideY = -8;
+        if (state.notifViewerOpen && state.notifViewerIdx == -1 && state.timer.active) {
+            state.timer.active = false; state.timer.fired = false; state.timerPaused = false;
+            state.notifViewerOpen = false; state.notifSlideY = -8;
             beepOnce(1000, 60); delay(80); beepOnce(600, 80);
-        } else { timerPaused = false; postEvent("select_long"); lastConfigFetch = 0; }
+        } else { state.timerPaused = false; postEvent(state, "select_long"); state.lastConfigFetch = 0; }
     }
     if (m == HIGH && btnMidLast == LOW && !btnMidLongFired) {
         beepOnce(BEEP_SHORT_FREQ, BEEP_SHORT_DUR);
-        if (notifViewerOpen) { notifViewerOpen = false; notifSlideY = -8; }
-        else if (notifCount > 0 || timer.active) {
-            notifViewerOpen = true; notifViewerIdx = timer.active ? -1 : 0;
-            notifSlideY = -8; notifScrollX = 0; notifOpenTime = now;
-        } else { timerPaused = false; postEvent("select"); lastConfigFetch = 0; }
+        if (state.notifViewerOpen) { state.notifViewerOpen = false; state.notifSlideY = -8; }
+        else if (state.notifCount > 0 || state.timer.active) {
+            state.notifViewerOpen = true; state.notifViewerIdx = state.timer.active ? -1 : 0;
+            state.notifSlideY = -8; state.notifScrollX = 0; state.notifOpenTime = now;
+        } else { state.timerPaused = false; postEvent(state, "select"); state.lastConfigFetch = 0; }
     }
 
     // --- RIGHT ---
     if (r == LOW && btnRightLast == HIGH) { btnRightDown = now; btnRightLongFired = false; beepOnce(BEEP_DOWN_FREQ, BEEP_DOWN_DUR); }
     if (r == LOW && !btnRightLongFired && now - btnRightDown >= LONG_PRESS_MS) {
-        btnRightLongFired = true; beepOnce(BEEP_LONG_FREQ, BEEP_LONG_DUR); postEvent("right_long");
+        btnRightLongFired = true; beepOnce(BEEP_LONG_FREQ, BEEP_LONG_DUR); postEvent(state, "right_long");
     }
     if (r == HIGH && btnRightLast == LOW && !btnRightLongFired) {
         beepOnce(BEEP_SHORT_FREQ, BEEP_SHORT_DUR);
-        if (notifViewerOpen) {
-            if (notifViewerIdx == -1) {
-                if (timer.fired) { timer.active = false; timer.fired = false; }
-                if (notifCount > 0) notifViewerIdx = 0; else notifViewerOpen = false;
+        if (state.notifViewerOpen) {
+            if (state.notifViewerIdx == -1) {
+                if (state.timer.fired) { state.timer.active = false; state.timer.fired = false; }
+                if (state.notifCount > 0) state.notifViewerIdx = 0; else state.notifViewerOpen = false;
             } else {
-                notifViewerIdx++;
-                if (notifViewerIdx >= notifCount) {
-                    notifViewerOpen = false; notifCount = 0;
-                    for (int i = 0; i < MAX_NOTIFICATIONS; i++) notifications[i].active = false;
+                state.notifViewerIdx++;
+                if (state.notifViewerIdx >= state.notifCount) {
+                    state.notifViewerOpen = false; state.notifCount = 0;
+                    for (int i = 0; i < MAX_NOTIFICATIONS; i++) state.notifications[i].active = false;
                 }
             }
-            notifSlideY = -8; notifScrollX = 0; notifOpenTime = now;
-        } else if (config.buttons == "navigate") navigateNext();
-        postEvent("right");
+            state.notifSlideY = -8; state.notifScrollX = 0; state.notifOpenTime = now;
+        } else if (state.config.buttons == "navigate") navigateNext(state);
+        postEvent(state, "right");
     }
 
     btnLeftLast = l; btnMidLast = m; btnRightLast = r;

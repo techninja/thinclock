@@ -3,6 +3,7 @@
 #include "screen_state.h"
 #include "display.h"
 #include "config_manager.h"
+#include "app_state.h"
 #include <WebSocketsClient.h>
 
 /**
@@ -16,7 +17,7 @@ public:
     void loop();
 
     // Call from main loop — does one frame of work if job active
-    void tick(Display& display, ConfigManager& configMgr, Config& config);
+    void tick(Display& display, ConfigManager& configMgr, AppState& appState);
 
     bool isConnected() { return _connected; }
 
@@ -41,6 +42,6 @@ private:
     uint32_t _lastLiveFrame = 0;
     static const uint32_t LIVE_INTERVAL_MS = 100; // 10fps
 
-    void startJob(uint8_t* payload, size_t length, ConfigManager& configMgr, Config& config);
+    void startJob(uint8_t* payload, size_t length, ConfigManager& configMgr, AppState& appState);
     void sendFrame(Display& display);
 };

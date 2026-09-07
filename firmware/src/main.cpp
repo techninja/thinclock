@@ -5,6 +5,7 @@
 #include <Preferences.h>
 #include <ArduinoJson.h>
 #include "thinclock.h"
+#include "app_state.h"
 #include "display.h"
 #include "config_manager.h"
 #include "sensors.h"
@@ -15,48 +16,26 @@
 #include "screens.h"
 #include "http_routes.h"
 
-// --- Globals ---
-Display      display;
+// --- Hardware singletons (genuinely process-wide) ---
+Display       display;
 ConfigManager configMgr;
-Config       config;
-Preferences  prefs;
-Sensors      sensors;
-WebServer    httpServer(80);
-DNSServer    dnsServer;
-RenderClient renderClient;
+Preferences   prefs;
+Sensors       sensors;
+WebServer     httpServer(80);
+DNSServer     dnsServer;
+RenderClient  renderClient;
 
 String wifiSSID, wifiPass, configURL;
 bool   wifiBadPassword = false;
 std::vector<ScannedNet> scannedNets;
 
-uint32_t lastConfigFetch = 0, lastDataFetch = 0, lastSensorRead = 0;
-uint32_t lastScreenSwitch = 0, lastButtonCheck = 0;
-int      currentScreen = 0;
-JsonDocument screenData;
-
-ScreenState  currentState, prevState;
-int          prevScreenIdx = -1;
-JsonDocument prevScreenData;
-uint16_t     transitionProgress = 255;
-bool         transitioning = false;
-
-Notification notifications[MAX_NOTIFICATIONS];
-int      notifCount = 0;
-bool     notifViewerOpen = false;
-int      notifViewerIdx = 0;
-int16_t  notifSlideY = -8;
-int16_t  notifScrollX = 0;
-uint32_t notifLastScroll = 0;
-uint32_t notifOpenTime = 0;
-#define NOTIF_TIMEOUT_MS  60000
-#define NOTIF_SCROLL_SPEED 80
-
-Timer    timer;
-bool     timerPaused = false;
-uint32_t timerPausedRemaining = 0;
+// --- Shared mutable state ---
+AppState state;
 
 #define SENSOR_READ_MS  2000
 #define BUTTON_CHECK_MS 50
+#define NOTIF_TIMEOUT_MS  60000
+#define NOTIF_SCROLL_SPEED 80
 
 // --- Serial provisioning ---
 static void handleSerial() {
@@ -87,7 +66,10 @@ void setup() {
     display.drawText("BOOT", 1, 0, 0x004400); display.show();
     sensors.begin(); sensors.read();
     setupWiFi();
-    config.valid = false; config.transition_ms = 8; config.time_format = "24h";
+    state.config.valid = false;
+    state.config.transition_ms = 8;
+    state.config.time_format = "24h";
+    registerHttpRoutes(state);
 }
 
 void loop() {
@@ -96,7 +78,7 @@ void loop() {
     dnsServer.processNextRequest();
     httpServer.handleClient();
     renderClient.loop();
-    renderClient.tick(display, configMgr, config);
+    renderClient.tick(display, configMgr, state);
     uint32_t now = millis();
 
     // Collect async scan results once ready
@@ -108,26 +90,26 @@ void loop() {
         Serial.printf("[wifi] scan done: %d networks\n", scanN);
     }
 
-    if (now - lastButtonCheck > BUTTON_CHECK_MS) { checkButtons(); checkLDR(); lastButtonCheck = now; now = millis(); }
+    static uint32_t lastSensorRead = 0, lastButtonCheck = 0;
+    if (now - lastButtonCheck > BUTTON_CHECK_MS) { checkButtons(state); checkLDR(state); lastButtonCheck = now; now = millis(); }
     if (now - lastSensorRead  > SENSOR_READ_MS)  { sensors.read(); lastSensorRead = now; }
 
     // Config fetch with exponential backoff
     static uint32_t configBackoff = CONFIG_POLL_MS; // cppcheck-suppress variableScope
     static uint8_t  failCount = 0;                  // cppcheck-suppress variableScope
     if (!configURL.isEmpty() && WiFi.status() == WL_CONNECTED) {
-        if (!config.valid || now - lastConfigFetch > configBackoff) {
+        if (!state.config.valid || now - state.lastConfigFetch > configBackoff) {
             Config newCfg;
             if (configMgr.fetchConfig(configURL, newCfg)) {
                 configBackoff = CONFIG_POLL_MS; failCount = 0;
                 display.setBrightness(newCfg.brightness);
                 char tz[16]; int off = -newCfg.timezone_offset;
                 snprintf(tz, sizeof(tz), "UTC%+d", off); configTzTime(tz, "pool.ntp.org");
-                bool wasInvalid = !config.valid; config = newCfg;
-                if (currentScreen >= (int)config.screens.size() || wasInvalid) {
-                    currentScreen = 0; lastScreenSwitch = now; resetState(currentState);
+                bool wasInvalid = !state.config.valid; state.config = newCfg;
+                if (state.currentScreen >= (int)state.config.screens.size() || wasInvalid) {
+                    state.currentScreen = 0; state.lastScreenSwitch = now; resetState(state.currentState);
                 }
                 if (wasInvalid) {
-                    // Parse host:port from configURL and connect WebSocket
                     String url = configURL;
                     url.replace("http://", ""); url.replace("https://", "");
                     int slash = url.indexOf('/');
@@ -139,8 +121,8 @@ void loop() {
                     Serial.printf("[ws] connecting to %s:%d\n", host.c_str(), port);
                 }
             }
-            lastConfigFetch = now;
-            if (!config.valid) {
+            state.lastConfigFetch = now;
+            if (!state.config.valid) {
                 configBackoff = min((uint32_t)300000, configBackoff * 2);
                 if (++failCount >= 5) {
                     Serial.println("[config] too many failures — clearing URL");
@@ -151,14 +133,12 @@ void loop() {
         }
     }
 
-    // AP setup mode — keep pumping DNS/HTTP, never block
+    // AP setup mode
     if (WiFi.status() != WL_CONNECTED) {
         static uint32_t lastApScroll = 0;
         if (now - lastApScroll > 15000) {
             lastApScroll = now;
-            // Scroll on display but pump server between frames
             auto scrollAP = [](const String& text, uint32_t color) {
-                extern Display display;
                 int16_t textW = display.nativeTextWidth(text, 1, false);
                 for (int16_t x = MATRIX_WIDTH; x > -textW; x--) {
                     display.clear();
@@ -175,14 +155,12 @@ void loop() {
         }
         if (digitalRead(BUTTON_MID) == LOW) {
             delay(50);
-            if (digitalRead(BUTTON_MID) == LOW) {
-                lastApScroll = 0; // force re-scroll with IP
-            }
+            if (digitalRead(BUTTON_MID) == LOW) lastApScroll = 0;
         }
         return;
     }
 
-    if (!config.valid || config.screens.empty()) {
+    if (!state.config.valid || state.config.screens.empty()) {
         showClock();
         if (digitalRead(BUTTON_MID) == LOW) { delay(50); if (digitalRead(BUTTON_MID) == LOW) {
             scrollText("IP " + WiFi.localIP().toString(), 0x00FF44);
@@ -192,45 +170,45 @@ void loop() {
     }
 
     // Data fetch
-    Screen& scr = config.screens[currentScreen];
+    Screen& scr = state.config.screens[state.currentScreen];
     String dataUrl = scr.data_url;
     if (dataUrl.isEmpty()) for (auto& l : scr.layers) if (l.type == LAYER_TEXT && !l.data_url.isEmpty()) { dataUrl = l.data_url; break; }
-    if (!dataUrl.isEmpty() && now - lastDataFetch > DATA_POLL_MS) { configMgr.fetchData(dataUrl, screenData); lastDataFetch = now; }
+    if (!dataUrl.isEmpty() && now - state.lastDataFetch > DATA_POLL_MS) { configMgr.fetchData(dataUrl, state.screenData); state.lastDataFetch = now; }
 
     // Render + transition
-    if (transitioning && prevScreenIdx >= 0) {
-        if (!dataUrl.isEmpty() && screenData.isNull()) {
-            display.renderToMain(); renderScreen(config.screens[prevScreenIdx], prevState, prevScreenData);
+    if (state.transitioning && state.prevScreenIdx >= 0) {
+        if (!dataUrl.isEmpty() && state.screenData.isNull()) {
+            display.renderToMain(); renderScreen(state, state.config.screens[state.prevScreenIdx], state.prevState, state.prevScreenData);
         } else {
-            display.renderToPrev(); renderScreen(config.screens[prevScreenIdx], prevState, prevScreenData);
-            display.renderToMain(); renderScreen(scr, currentState, screenData);
-            transitionProgress += config.transition_ms;
-            if (transitionProgress >= 255) { transitioning = false; prevScreenIdx = -1; }
-            else display.crossfade((uint8_t)transitionProgress);
+            display.renderToPrev(); renderScreen(state, state.config.screens[state.prevScreenIdx], state.prevState, state.prevScreenData);
+            display.renderToMain(); renderScreen(state, scr, state.currentState, state.screenData);
+            state.transitionProgress += state.config.transition_ms;
+            if (state.transitionProgress >= 255) { state.transitioning = false; state.prevScreenIdx = -1; }
+            else display.crossfade((uint8_t)state.transitionProgress);
         }
-    } else renderScreen(scr, currentState, screenData);
+    } else renderScreen(state, scr, state.currentState, state.screenData);
 
     // Notification overlay
-    if (notifViewerOpen) {
-        if (now - notifOpenTime > NOTIF_TIMEOUT_MS) { notifViewerOpen = false; notifSlideY = -8; }
+    if (state.notifViewerOpen) {
+        if (now - state.notifOpenTime > NOTIF_TIMEOUT_MS) { state.notifViewerOpen = false; state.notifSlideY = -8; }
         else {
             display.fadeAll(25);
-            if (notifSlideY < 0) notifSlideY += 1;
-            if (notifViewerIdx == -1 && timer.active) {
-                for (int16_t bx = 0; bx < MATRIX_WIDTH; bx++) display.drawPixel(bx, max((int16_t)0, notifSlideY), timer.color);
-                if (notifSlideY >= 0) {
-                    int32_t rem = timerPaused ? timerPausedRemaining : (int32_t)(timer.endTime - millis());
+            if (state.notifSlideY < 0) state.notifSlideY += 1;
+            if (state.notifViewerIdx == -1 && state.timer.active) {
+                for (int16_t bx = 0; bx < MATRIX_WIDTH; bx++) display.drawPixel(bx, max((int16_t)0, state.notifSlideY), state.timer.color);
+                if (state.notifSlideY >= 0) {
+                    int32_t rem = state.timerPaused ? state.timerPausedRemaining : (int32_t)(state.timer.endTime - millis());
                     if (rem < 0) rem = 0;
                     char buf[6]; snprintf(buf, sizeof(buf), "%02d:%02d", rem / 60000, (rem / 1000) % 60);
-                    display.drawNativeText(buf, 8, notifSlideY + 2, timer.color, 1, false);
+                    display.drawNativeText(buf, 8, state.notifSlideY + 2, state.timer.color, 1, false);
                 }
-            } else if (notifViewerIdx >= 0 && notifViewerIdx < notifCount) {
-                Notification& n = notifications[notifViewerIdx];
-                for (int16_t bx = 0; bx < MATRIX_WIDTH; bx++) display.drawPixel(bx, max((int16_t)0, notifSlideY), n.color);
-                if (notifSlideY >= 0) {
-                    int16_t textY = notifSlideY + 2, iconW = 0;
-                    if (!n.icon_name.isEmpty() && config.icons.count(n.icon_name)) {
-                        Icon& ic = config.icons[n.icon_name];
+            } else if (state.notifViewerIdx >= 0 && state.notifViewerIdx < state.notifCount) {
+                Notification& n = state.notifications[state.notifViewerIdx];
+                for (int16_t bx = 0; bx < MATRIX_WIDTH; bx++) display.drawPixel(bx, max((int16_t)0, state.notifSlideY), n.color);
+                if (state.notifSlideY >= 0) {
+                    int16_t textY = state.notifSlideY + 2, iconW = 0;
+                    if (!n.icon_name.isEmpty() && state.config.icons.count(n.icon_name)) {
+                        Icon& ic = state.config.icons[n.icon_name];
                         if (!ic.frames.empty()) { display.drawSprite(ic.frames[0].data(), ic.width, min((uint8_t)6, ic.height), 0, textY - 1); iconW = ic.width + 1; }
                     }
                     for (const auto& l : n.layers) {
@@ -238,56 +216,65 @@ void loop() {
                         int16_t tw = display.nativeTextWidth(l.label), avail = MATRIX_WIDTH - iconW;
                         if (tw <= avail) { display.drawNativeText(l.label, iconW + (avail - tw) / 2, textY, l.color, 1, false); }
                         else {
-                            display.drawNativeText(l.label, MATRIX_WIDTH - notifScrollX, textY, l.color, 1, false);
+                            display.drawNativeText(l.label, MATRIX_WIDTH - state.notifScrollX, textY, l.color, 1, false);
                             if (iconW > 0) {
                                 display.clearRect(0, textY - 1, iconW, 7);
-                                Icon& ic = config.icons[n.icon_name];
+                                Icon& ic = state.config.icons[n.icon_name];
                                 if (!ic.frames.empty()) display.drawSprite(ic.frames[0].data(), ic.width, min((uint8_t)6, ic.height), 0, textY - 1);
                             }
-                            if (now - notifLastScroll >= NOTIF_SCROLL_SPEED) {
-                                notifScrollX++; notifLastScroll = now;
-                                if ((MATRIX_WIDTH - notifScrollX) + tw < iconW) notifScrollX = 0;
+                            if (now - state.notifLastScroll >= NOTIF_SCROLL_SPEED) {
+                                state.notifScrollX++; state.notifLastScroll = now;
+                                if ((MATRIX_WIDTH - state.notifScrollX) + tw < iconW) state.notifScrollX = 0;
                             }
                         }
                     }
                 }
-            } else { notifViewerOpen = false; notifSlideY = -8; }
+            } else { state.notifViewerOpen = false; state.notifSlideY = -8; }
         }
-    } else if (notifCount > 0 || timer.active) {
-        if (timer.active) {
-            if (!timerPaused) {
-                int32_t rem = (int32_t)(timer.endTime - millis()); if (rem < 0) rem = 0;
-                float prog = 1.0f - (float)rem / timer.duration;
+    } else if (state.notifCount > 0 || state.timer.active) {
+        if (state.timer.active) {
+            if (!state.timerPaused) {
+                int32_t rem = (int32_t)(state.timer.endTime - millis()); if (rem < 0) rem = 0;
+                float prog = 1.0f - (float)rem / state.timer.duration;
                 uint16_t cyc = max((uint16_t)800, (uint16_t)(6000 - prog * prog * 5200));
                 float breath = 0.25f + ((sin(millis() * 6.2832f / cyc) + 1.0f) * 0.5f) * 0.75f;
                 display.drawPixel(MATRIX_WIDTH - 1, 0,
-                    ((uint32_t)(uint8_t)(((timer.color >> 16) & 0xFF) * breath) << 16) |
-                    ((uint32_t)(uint8_t)(((timer.color >>  8) & 0xFF) * breath) <<  8) |
-                    (uint8_t)((timer.color & 0xFF) * breath));
+                    ((uint32_t)(uint8_t)(((state.timer.color >> 16) & 0xFF) * breath) << 16) |
+                    ((uint32_t)(uint8_t)(((state.timer.color >>  8) & 0xFF) * breath) <<  8) |
+                    (uint8_t)((state.timer.color & 0xFF) * breath));
             } else {
                 display.drawPixel(MATRIX_WIDTH - 1, 0,
-                    (((timer.color >> 16) & 0xFF) >> 2) << 16 | (((timer.color >> 8) & 0xFF) >> 2) << 8 | ((timer.color & 0xFF) >> 2));
+                    (((state.timer.color >> 16) & 0xFF) >> 2) << 16 |
+                    (((state.timer.color >>  8) & 0xFF) >> 2) << 8  |
+                    ((state.timer.color & 0xFF) >> 2));
             }
         }
-        int dotOff = timer.active ? 2 : 0;
-        for (int i = 0; i < notifCount && i < 3; i++) display.drawPixel(MATRIX_WIDTH - 1 - dotOff - (i * 2), 0, notifications[i].color);
+        int dotOff = state.timer.active ? 2 : 0;
+        for (int i = 0; i < state.notifCount && i < 3; i++)
+            display.drawPixel(MATRIX_WIDTH - 1 - dotOff - (i * 2), 0, state.notifications[i].color);
     }
 
     display.show();
 
     // Timer completion
-    if (timer.active && !timer.fired && !timerPaused && millis() >= timer.endTime) { timer.fired = true; beepTriple(); }
+    if (state.timer.active && !state.timer.fired && !state.timerPaused && millis() >= state.timer.endTime)
+        { state.timer.fired = true; beepTriple(); }
 
     // Alert beeps
-    if (!notifViewerOpen) {
-        if (timer.active && timer.fired) { static uint32_t lastTimerBeep = 0; if (now - lastTimerBeep >= 15000) { beepTriple(); lastTimerBeep = now; } }
-        for (int i = 0; i < notifCount; i++)
-            if (notifications[i].beep == 2 && notifications[i].active && now - notifications[i].lastBeep >= notifications[i].alertInterval)
-                { beepTriple(); notifications[i].lastBeep = now; }
+    if (!state.notifViewerOpen) {
+        if (state.timer.active && state.timer.fired) {
+            static uint32_t lastTimerBeep = 0;
+            if (now - lastTimerBeep >= 15000) { beepTriple(); lastTimerBeep = now; }
+        }
+        for (int i = 0; i < state.notifCount; i++)
+            if (state.notifications[i].beep == 2 && state.notifications[i].active &&
+                now - state.notifications[i].lastBeep >= state.notifications[i].alertInterval)
+                { beepTriple(); state.notifications[i].lastBeep = now; }
     }
 
     // Screen cycling
-    if (!transitioning && now - lastScreenSwitch > scr.duration && !screenHasScrolling(currentState)) { switchScreen(); postEvent("screen_changed"); }
+    if (!state.transitioning && now - state.lastScreenSwitch > scr.duration && !screenHasScrolling(state.currentState))
+        { switchScreen(state); postEvent(state, "screen_changed"); }
 
     delay(20);
 }

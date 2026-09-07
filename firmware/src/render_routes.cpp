@@ -5,9 +5,8 @@
 #include "thinclock.h"
 #include <ArduinoJson.h>
 
-extern Config       config;
-extern ConfigManager configMgr;
 extern Display      display;
+extern ConfigManager configMgr;
 
 // -----------------------------------------------------------------------
 // Shared helper
@@ -28,7 +27,7 @@ void unzigzag(const uint8_t* fb, uint8_t* out) {
 // Binary output handlers
 // -----------------------------------------------------------------------
 
-void handleFramebuffer() {
+void handleFramebuffer(AppState& /*state*/) {
     static uint8_t linear[NUM_LEDS * 3];
     unzigzag(display.getFramebuffer(), linear);
     WiFiClient client = httpServer.client();
@@ -38,11 +37,11 @@ void handleFramebuffer() {
     client.write(linear, NUM_LEDS * 3);
 }
 
-void handlePreview() {
-    if (!config.valid || config.screens.empty()) { httpServer.send(400, "application/json", "{\"error\":\"no config\"}"); return; }
+void handlePreview(AppState& state) {
+    if (!state.config.valid || state.config.screens.empty()) { httpServer.send(400, "application/json", "{\"error\":\"no config\"}"); return; }
     int screenIdx = httpServer.arg("screen").toInt();
     int frames    = httpServer.arg("frames").toInt();
-    if (screenIdx < 0 || screenIdx >= (int)config.screens.size()) { httpServer.send(400, "application/json", "{\"error\":\"invalid screen\"}"); return; }
+    if (screenIdx < 0 || screenIdx >= (int)state.config.screens.size()) { httpServer.send(400, "application/json", "{\"error\":\"invalid screen\"}"); return; }
     frames = constrain(frames, 1, 120);
 
     WiFiClient client = httpServer.client();
@@ -53,29 +52,29 @@ void handlePreview() {
     static CRGB savedBuf[NUM_LEDS];
     memcpy(savedBuf, display.getFramebuffer(), sizeof(savedBuf));
 
-    Screen& scr = config.screens[screenIdx];
+    Screen& scr = state.config.screens[screenIdx];
     ScreenState st; resetState(st); initScreenState(st, scr);
     JsonDocument data;
     if (!scr.data_url.isEmpty()) configMgr.fetchData(scr.data_url, data);
 
     static uint8_t linear[NUM_LEDS * 3];
     for (int f = 0; f < frames; f++) {
-        display.clear(); renderScreen(scr, st, data);
+        renderScreen(state, scr, st, data);
         unzigzag(display.getFramebuffer(), linear);
         client.write(linear, NUM_LEDS * 3); yield();
     }
     memcpy(const_cast<uint8_t*>(display.getFramebuffer()), savedBuf, sizeof(savedBuf));
 }
 
-void handleRender() {
+void handleRender(AppState& state) {
     JsonDocument doc;
     if (deserializeJson(doc, httpServer.arg("plain"))) { httpServer.send(400, "application/json", "{\"error\":\"parse\"}"); return; }
     int  frames       = constrain((int)(doc["frames"] | 1), 1, 120);
     bool showOnDevice = doc["display"] | false;
 
     Screen tmp; tmp.duration = 0; tmp.data_url = doc["data_url"] | "";
-    for (JsonObject l : doc["layers"].as<JsonArray>()) tmp.layers.push_back(configMgr.parseLayer(l, config.scroll_speed));
-    if (doc["icons"].is<JsonObject>()) configMgr.parseIcons(doc["icons"].as<JsonObject>(), config.icons);
+    for (JsonObject l : doc["layers"].as<JsonArray>()) tmp.layers.push_back(configMgr.parseLayer(l, state.config.scroll_speed));
+    if (doc["icons"].is<JsonObject>()) configMgr.parseIcons(doc["icons"].as<JsonObject>(), state.config.icons);
 
     static CRGB savedBuf[NUM_LEDS];
     memcpy(savedBuf, display.getFramebuffer(), sizeof(savedBuf));
@@ -91,7 +90,7 @@ void handleRender() {
 
     static uint8_t linear[NUM_LEDS * 3];
     for (int f = 0; f < frames; f++) {
-        display.clear(); renderScreen(tmp, st, data);
+        renderScreen(state, tmp, st, data);
         unzigzag(display.getFramebuffer(), linear);
         client.write(linear, NUM_LEDS * 3);
         if (showOnDevice) display.show();
@@ -104,8 +103,8 @@ void handleRender() {
 // GIF handlers
 // -----------------------------------------------------------------------
 
-static void renderGif(Screen& scr, ScreenState& st, const JsonDocument& data, int frames,
-                      uint8_t scale, uint8_t gap, uint8_t gamma) {
+static void renderGif(AppState& state, Screen& scr, ScreenState& st, const JsonDocument& data,
+                      int frames, uint8_t scale, uint8_t gap, uint8_t gamma) {
     static CRGB savedBuf[NUM_LEDS];
     memcpy(savedBuf, display.getFramebuffer(), sizeof(savedBuf));
 
@@ -116,7 +115,7 @@ static void renderGif(Screen& scr, ScreenState& st, const JsonDocument& data, in
     GifEncoder gif; gif.begin(client, 66, scale, gap, gamma);
     static uint8_t linear[NUM_LEDS * 3];
     for (int f = 0; f < frames; f++) {
-        display.clear(); renderScreen(scr, st, data);
+        renderScreen(state, scr, st, data);
         memset(linear, 0, sizeof(linear));
         unzigzag(display.getFramebuffer(), linear);
         gif.addFrame(linear); delay(66); yield();
@@ -125,23 +124,23 @@ static void renderGif(Screen& scr, ScreenState& st, const JsonDocument& data, in
     memcpy(const_cast<uint8_t*>(display.getFramebuffer()), savedBuf, sizeof(savedBuf));
 }
 
-void handleGifGet() {
-    if (!config.valid || config.screens.empty()) { httpServer.send(400, "application/json", "{\"error\":\"no config\"}"); return; }
+void handleGifGet(AppState& state) {
+    if (!state.config.valid || state.config.screens.empty()) { httpServer.send(400, "application/json", "{\"error\":\"no config\"}"); return; }
     int screenIdx = httpServer.arg("screen").toInt();
-    if (screenIdx < 0 || screenIdx >= (int)config.screens.size()) { httpServer.send(400, "application/json", "{\"error\":\"invalid screen\"}"); return; }
+    if (screenIdx < 0 || screenIdx >= (int)state.config.screens.size()) { httpServer.send(400, "application/json", "{\"error\":\"invalid screen\"}"); return; }
     int     seconds = constrain(httpServer.arg("seconds").toInt(), 1, 10); if (seconds < 1) seconds = 2;
     uint8_t scale   = max((uint8_t)1, (uint8_t)httpServer.arg("scale").toInt());
     uint8_t gap     = httpServer.arg("gap").toInt();
     uint8_t gamma   = httpServer.arg("gamma").toInt(); if (gamma < 10) gamma = 18;
 
-    Screen& scr = config.screens[screenIdx];
+    Screen& scr = state.config.screens[screenIdx];
     ScreenState st; resetState(st); initScreenState(st, scr);
     JsonDocument data;
     if (!scr.data_url.isEmpty()) configMgr.fetchData(scr.data_url, data);
-    renderGif(scr, st, data, seconds * 15, scale, gap, gamma);
+    renderGif(state, scr, st, data, seconds * 15, scale, gap, gamma);
 }
 
-void handleGifPost() {
+void handleGifPost(AppState& state) {
     JsonDocument doc;
     if (deserializeJson(doc, httpServer.arg("plain"))) { httpServer.send(400, "application/json", "{\"error\":\"parse\"}"); return; }
     int     seconds = constrain((int)(doc["seconds"] | 2), 1, 10);
@@ -150,12 +149,12 @@ void handleGifPost() {
     uint8_t gamma   = doc["gamma"] | 18; if (gamma < 10) gamma = 18;
 
     Screen tmp; tmp.duration = 0; tmp.data_url = doc["data_url"] | "";
-    for (JsonObject l : doc["layers"].as<JsonArray>()) tmp.layers.push_back(configMgr.parseLayer(l, config.scroll_speed));
-    if (doc["icons"].is<JsonObject>()) configMgr.parseIcons(doc["icons"].as<JsonObject>(), config.icons);
+    for (JsonObject l : doc["layers"].as<JsonArray>()) tmp.layers.push_back(configMgr.parseLayer(l, state.config.scroll_speed));
+    if (doc["icons"].is<JsonObject>()) configMgr.parseIcons(doc["icons"].as<JsonObject>(), state.config.icons);
 
     ScreenState st; resetState(st); initScreenState(st, tmp);
     JsonDocument data;
     if      (doc["data"].is<JsonObject>())    data = doc["data"];
     else if (!tmp.data_url.isEmpty())         configMgr.fetchData(tmp.data_url, data);
-    renderGif(tmp, st, data, seconds * 15, scale, gap, gamma);
+    renderGif(state, tmp, st, data, seconds * 15, scale, gap, gamma);
 }
