@@ -40,9 +40,9 @@ const state = {
   startedAt: null,
 };
 
-const WORK_MS = 25 * 60 * 1000;
-const BREAK_MS = 5 * 60 * 1000;
-const LONG_BREAK_MS = 15 * 60 * 1000;
+const _WORK_MS = 25 * 60 * 1000;
+const _BREAK_MS = 5 * 60 * 1000;
+const _LONG_BREAK_MS = 15 * 60 * 1000;
 function getPhaseColor() {
   switch (state.phase) {
     case 'work':

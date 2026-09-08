@@ -22,6 +22,13 @@ export default class HomeAssistantAdapter {
     this.ws = null;
     this._msgId = 1;
     this._pending = new Map();
+    this._entityListeners = [];
+  }
+
+  onEntity(entity_id, fn) {
+    this._entityListeners.push((id) => {
+      if (id === entity_id) fn();
+    });
   }
 
   setup(app, _config) {
@@ -62,7 +69,10 @@ export default class HomeAssistantAdapter {
         this._pending.delete(msg.id);
       } else if (msg.type === 'event' && msg.event?.event_type === 'state_changed') {
         const { entity_id, new_state } = msg.event.data;
-        if (new_state) this.entities[entity_id] = new_state;
+        if (new_state) {
+          this.entities[entity_id] = new_state;
+          this._entityListeners.forEach((fn) => fn(entity_id));
+        }
       }
     });
 
@@ -88,6 +98,10 @@ export default class HomeAssistantAdapter {
       this.entities[state.entity_id] = state;
     }
     console.log(`  [ha] Loaded ${Object.keys(this.entities).length} entities`);
+    // Notify listeners for all loaded entities so subscribers get initial state
+    this._entityListeners.forEach((fn) => {
+      Object.keys(this.entities).forEach((id) => fn(id));
+    });
   }
 
   async _subscribe() {

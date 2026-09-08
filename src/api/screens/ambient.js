@@ -4,7 +4,7 @@ export const priority = 1;
 export const tags = ['ambient', 'mood'];
 export const schedule = 'evening';
 
-export const screen = (config) => {
+export const screen = (_config) => {
   // Slowly rotate hue based on time — shifts every config poll (30s)
   const t = (Date.now() / 120000) % 1; // cycles every 2 minutes
 

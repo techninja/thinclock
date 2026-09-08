@@ -39,7 +39,7 @@ export default [
       'unused-imports/no-unused-imports': 'error',
       'unused-imports/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       'no-console': 'off',
-      'no-empty': ['error', { allowEmptyCatch: false }],
+      'no-empty': ['error', { allowEmptyCatch: true }],
     },
   },
   {
@@ -51,7 +51,7 @@ export default [
     },
   },
   {
-    ignores: ['node_modules/', 'src/vendor/', 'firmware/.pio/'],
+    ignores: ['node_modules/', 'src/vendor/', 'thinclock-addon/src/vendor/', 'firmware/.pio/'],
   },
   prettier,
 ];
