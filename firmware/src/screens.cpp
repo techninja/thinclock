@@ -98,18 +98,18 @@ static void applyTweens(Layer& layer, uint32_t elapsed) {
 // renderScreen
 // -----------------------------------------------------------------------
 
-void renderScreen(AppState& state, Screen& scr, ScreenState& /*ss*/, const JsonDocument& data) {
-    if (!state.inited) initScreenState(state, scr);
+void renderScreen(AppState& state, Screen& scr, ScreenState& ss, const JsonDocument& data) {
+    if (!ss.inited) initScreenState(ss, scr);
 
     uint32_t now = millis();
-    uint32_t dt  = now - state.lastTick;
-    state.lastTick = now;
+    uint32_t dt  = now - ss.lastTick;
+    ss.lastTick = now;
 
     int textIdx = 0, iconIdx = 0, particleIdx = 0;
     display.clear();
 
     for (auto& layer : scr.layers) {
-        if (!layer.tweens.empty()) applyTweens(layer, now - state.startTime);
+        if (!layer.tweens.empty()) applyTweens(layer, now - ss.startTime);
 
         bool needsBlend = (layer.opacity < 255 || layer.blend == "add");
         if (needsBlend) display.snapshotLayer();
@@ -117,8 +117,8 @@ void renderScreen(AppState& state, Screen& scr, ScreenState& /*ss*/, const JsonD
         switch (layer.type) {
 
         case LAYER_PARTICLES: {
-            if (particleIdx < (int)state.particleSystems.size()) {
-                auto& ps = state.particleSystems[particleIdx];
+            if (particleIdx < (int)ss.particleSystems.size()) {
+                auto& ps = ss.particleSystems[particleIdx];
                 ps.tick(dt); ps.render(display); particleIdx++;
             }
             break;
@@ -128,7 +128,7 @@ void renderScreen(AppState& state, Screen& scr, ScreenState& /*ss*/, const JsonD
             if (layer.icon_name.isEmpty() || !state.config.icons.count(layer.icon_name)) break;
             Icon& icon = state.config.icons[layer.icon_name];
             if (icon.frames.empty()) break;
-            IconState& is = state.iconStates[iconIdx++];
+            IconState& is = ss.iconStates[iconIdx++];
             if (icon.fps > 0 && icon.frames.size() > 1) {
                 uint32_t frameMs = 1000 / icon.fps;
                 if (now - is.lastStep >= frameMs) { is.frame = (is.frame + 1) % icon.frames.size(); is.lastStep = now; }
@@ -147,7 +147,7 @@ void renderScreen(AppState& state, Screen& scr, ScreenState& /*ss*/, const JsonD
         }
 
         case LAYER_TEXT: {
-            TextState& ts = state.textStates[textIdx++];
+            TextState& ts = ss.textStates[textIdx++];
             String text = layer.label;
             if ((!layer.data_url.isEmpty() || !scr.data_url.isEmpty()) && !data.isNull())
                 text = configMgr.resolvePlaceholders(layer.label, data);
@@ -185,7 +185,7 @@ void renderScreen(AppState& state, Screen& scr, ScreenState& /*ss*/, const JsonD
         }
 
         case LAYER_CLOCK: {
-            TextState& ts = state.textStates[textIdx++];
+            TextState& ts = ss.textStates[textIdx++];
             char buf[6] = "??:??";
             if (layer.clock_format == "timer") {
                 if (state.timer.active) {

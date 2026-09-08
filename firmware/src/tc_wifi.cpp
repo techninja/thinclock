@@ -47,7 +47,7 @@ void setupWiFi() {
     int n = WiFi.scanNetworks(false, false); // blocking, no hidden
     scannedNets.clear();
     for (int i = 0; i < n && i < 20; i++)
-        scannedNets.push_back({ WiFi.SSID(i), (int)WiFi.RSSI(i) });
+        scannedNets.push_back(ScannedNet(WiFi.SSID(i), (int)WiFi.RSSI(i)));
     WiFi.scanDelete();
     Serial.printf("[wifi] scan: %d networks\n", (int)scannedNets.size());
 

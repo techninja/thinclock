@@ -128,6 +128,7 @@ export function registerRoutes(app, registry, alerts, getDeviceIP, PORT, haAdapt
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Content-Length': 2 },
         });
+        r.on('error', () => { /* fire-and-forget */ });
         r.write('{}');
         r.end();
       } else if (action === 'pause') {
