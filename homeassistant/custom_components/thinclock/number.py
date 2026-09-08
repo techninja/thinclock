@@ -35,8 +35,9 @@ class ThinClockBrightness(CoordinatorEntity, NumberEntity):
 
     @property
     def native_value(self) -> float | None:
-        info = self.coordinator.data.get("info", {}) if self.coordinator.data else {}
-        return info.get("brightness")
+        data = self.coordinator.data or {}
+        val = (data.get("status") or {}).get("brightness")
+        return float(val) if val is not None else None
 
     async def async_set_native_value(self, value: float) -> None:
         from homeassistant.helpers.aiohttp_client import async_get_clientsession

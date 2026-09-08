@@ -1,7 +1,7 @@
 """Event entity for ThinClock button presses."""
 from __future__ import annotations
 
-from homeassistant.components.event import EventEntity, EventDeviceClass
+from homeassistant.components.event import EventDeviceClass, EventEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -39,5 +39,8 @@ class ThinClockButtonEvent(EventEntity):
         self._attr_device_info = _device_info(entry, coordinator)
 
     def fire(self, button: str) -> None:
-        self._trigger_event(BUTTON_EVENT_MAP.get(button, button))
+        mapped = BUTTON_EVENT_MAP.get(button, button)
+        if mapped not in self._attr_event_types:
+            return
+        self._trigger_event(mapped)
         self.async_write_ha_state()

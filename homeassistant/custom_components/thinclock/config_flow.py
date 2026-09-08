@@ -1,14 +1,17 @@
 """Config flow for ThinClock — per-device setup via zeroconf."""
 from __future__ import annotations
 
+import contextlib
+
 import aiohttp
 import voluptuous as vol
-from homeassistant import config_entries
 from homeassistant.components import zeroconf
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from homeassistant import config_entries
+
 DOMAIN = "thinclock"
-SERVER_INTERNAL = "http://local-thinclock:3232"  # reachable from add-on only, used to get real IP
+SERVER_INTERNAL = "http://homeassistant.local:3232"
 
 
 async def _get_device_info(hass, ip: str) -> dict:
@@ -23,7 +26,10 @@ async def _get_server_url(hass) -> str:
     """Read the real server URL written by the add-on to the HA config volume."""
     try:
         path = hass.config.path(".thinclock_server")
-        url = await hass.async_add_executor_job(lambda: open(path).read().strip())
+        def _read_url():
+            with open(path, encoding='utf-8') as f:
+                return f.read().strip()
+        url = await hass.async_add_executor_job(_read_url)
         if url:
             return url
     except Exception:
@@ -107,14 +113,10 @@ class ThinClockConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             name = f"ThinClock ({self._device_ip})"
             server_url = await _get_server_url(self.hass)
-            try:
+            with contextlib.suppress(Exception):
                 await _approve_device(self.hass, server_url, self._device_ip, name)
-            except Exception:
-                pass
-            try:
+            with contextlib.suppress(Exception):
                 await _push_config_url(self.hass, self._device_ip, server_url)
-            except Exception:
-                pass
             return self.async_create_entry(
                 title=name,
                 data={
