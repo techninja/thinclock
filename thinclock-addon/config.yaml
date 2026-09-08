@@ -1,7 +1,7 @@
 ---
 name: ThinClock
 description: Config server for ThinClock ESP32 LED matrix displays
-version: "0.1.15"
+version: "0.1.20"
 slug: thinclock
 url: https://github.com/techninja/thinclock
 init: false
