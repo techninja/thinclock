@@ -9,7 +9,7 @@ class Preferences;
 struct ScannedNet {
     String ssid;
     int32_t rssi;
-    ScannedNet(String s = "", int32_t r = 0) : ssid(s), rssi(r) {}
+    explicit ScannedNet(String s = "", int32_t r = 0) : ssid(s), rssi(r) {}
 };
 
 String setupPageHTML(const String& ssid, const String& cfgURL, bool apMode,

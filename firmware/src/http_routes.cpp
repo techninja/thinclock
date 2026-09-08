@@ -20,7 +20,7 @@ extern std::vector<ScannedNet> scannedNets;
 // JSON API handlers
 // -----------------------------------------------------------------------
 
-static void handleSensors(AppState& state) {
+static void handleSensors(const AppState& state) {
     JsonDocument doc;
     float temp = sensors.data.temperature;
     if (state.config.temp_unit == "F") temp = temp * 9.0f / 5.0f + 32.0f;
@@ -32,7 +32,7 @@ static void handleSensors(AppState& state) {
     httpServer.send(200, "application/json", out);
 }
 
-static void handleStatus(AppState& state) {
+static void handleStatus(const AppState& state) {
     JsonDocument doc;
     doc["uptime"]      = millis() / 1000;
     doc["wifi"]        = WiFi.RSSI();
@@ -43,6 +43,7 @@ static void handleStatus(AppState& state) {
         doc["screen_name"] = state.config.screens[state.currentScreen].name;
     }
     doc["last_button"] = state.lastButtonEvent;
+    doc["brightness"]   = state.config.brightness;
     String out; serializeJson(doc, out);
     httpServer.send(200, "application/json", out);
 }

@@ -98,7 +98,7 @@ static void applyTweens(Layer& layer, uint32_t elapsed) {
 // renderScreen
 // -----------------------------------------------------------------------
 
-void renderScreen(AppState& appState, Screen& scr, ScreenState& state, const JsonDocument& data) {
+void renderScreen(AppState& state, Screen& scr, ScreenState& /*ss*/, const JsonDocument& data) {
     if (!state.inited) initScreenState(state, scr);
 
     uint32_t now = millis();
@@ -125,8 +125,8 @@ void renderScreen(AppState& appState, Screen& scr, ScreenState& state, const Jso
         }
 
         case LAYER_ICON: {
-            if (layer.icon_name.isEmpty() || !appState.config.icons.count(layer.icon_name)) break;
-            Icon& icon = appState.config.icons[layer.icon_name];
+            if (layer.icon_name.isEmpty() || !state.config.icons.count(layer.icon_name)) break;
+            Icon& icon = state.config.icons[layer.icon_name];
             if (icon.frames.empty()) break;
             IconState& is = state.iconStates[iconIdx++];
             if (icon.fps > 0 && icon.frames.size() > 1) {
@@ -188,8 +188,8 @@ void renderScreen(AppState& appState, Screen& scr, ScreenState& state, const Jso
             TextState& ts = state.textStates[textIdx++];
             char buf[6] = "??:??";
             if (layer.clock_format == "timer") {
-                if (appState.timer.active) {
-                    int32_t rem = appState.timerPaused ? appState.timerPausedRemaining : (int32_t)(appState.timer.endTime - millis());
+                if (state.timer.active) {
+                    int32_t rem = state.timerPaused ? state.timerPausedRemaining : (int32_t)(state.timer.endTime - millis());
                     if (rem < 0) rem = 0;
                     snprintf(buf, sizeof(buf), "%02d:%02d", rem / 60000, (rem / 1000) % 60);
                 } else snprintf(buf, sizeof(buf), "--:--");
