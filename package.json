@@ -16,6 +16,7 @@
     "postinstall": "node scripts/setup.js",
     "test": "node scripts/test.js",
     "spec": "node scripts/spec.js",
+    "watch": "npx clearstack check watch",
     "release": "node scripts/release.js",
     "sideload": "node scripts/deploy.js local app",
     "deploy": "node scripts/deploy.js"
