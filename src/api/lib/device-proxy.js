@@ -3,8 +3,7 @@
  * All routes mounted at /api/device/* by server.js.
  */
 
-import { encodeGif } from './gif.js';
-import { frameListeners } from './ws-render.js';
+import { registerStreamRoute } from './device-stream.js';
 
 const TIMEOUT = { json: 3000, binary: 15000, gif: 30000 };
 
@@ -24,26 +23,9 @@ async function binaryProxy(res, url, opts = {}, headers = {}) {
   for (const [k, v] of Object.entries(headers)) res.set(k, v);
   res.send(Buffer.from(await resp.arrayBuffer()));
 }
+
 export function registerDeviceRoutes(app, getDeviceIP) {
-  // Multipart MJPEG-style stream — tap the existing WS framebuffer relay
-  app.get('/api/device/stream', (req, res) => {
-    res.set({
-      'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
-      'Cache-Control': 'no-store',
-      Connection: 'keep-alive',
-    });
-    res.flushHeaders();
-
-    function push(data) {
-      const frame = encodeGif([data], 5, 1, 18);
-      res.write('--frame\r\nContent-Type: image/gif\r\n\r\n');
-      res.write(frame);
-      res.write('\r\n');
-    }
-
-    frameListeners.add(push);
-    req.on('close', () => frameListeners.delete(push));
-  });
+  registerStreamRoute(app);
   app.get('/api/device/framebuffer', async (req, res) => {
     const ip = getDeviceIP();
     if (!ip) return res.status(503).end();

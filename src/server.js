@@ -3,13 +3,6 @@ import path from 'path';
 import os from 'os';
 import http from 'http';
 import { fileURLToPath } from 'url';
-
-// Prefix all console output with a timestamp
-const _log = console.log.bind(console);
-const _err = console.error.bind(console);
-const ts = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
-console.log = (...a) => _log(`[${ts()}]`, ...a);
-console.error = (...a) => _err(`[${ts()}]`, ...a);
 import ScreenRegistry from './api/lib/registry.js';
 import AlertEngine from './api/lib/alerts.js';
 import HomeAssistantAdapter from './api/adapters/homeassistant.js';
@@ -23,6 +16,14 @@ import { handleUpgrade, getConnectedDeviceIP } from './api/lib/ws-render.js';
 import { advertiseMDNS } from './api/lib/mdns.js';
 import { loadRegistry } from './api/lib/device-registry.js';
 import { registerRoutes } from './api/routes.js';
+import { registerConfigRoute } from './api/lib/config-route.js';
+
+// Prefix all console output with a timestamp
+const _log = console.log.bind(console);
+const _err = console.error.bind(console);
+const ts = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
+console.log = (...a) => _log(`[${ts()}]`, ...a);
+console.error = (...a) => _err(`[${ts()}]`, ...a);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -81,40 +82,8 @@ const active = registry.getActiveModules();
 console.log(`\nActive screens (${active.length}/${registry.modules.length}):`);
 active.forEach((m, i) => console.log(`  ${i}: ${m.name}`));
 
-const nightHours = () => (process.env.NIGHT_HOURS || '').split(',').map(Number).filter(Boolean);
-const isNightMode = () =>
-  nightHours().includes((new Date().getUTCHours() + config.timezone + 24) % 24);
-const getBrightness = () =>
-  isNightMode() ? parseInt(process.env.BRIGHTNESS_NIGHT) || 10 : config.brightness;
-
 app.get('/api/server/info', (req, res) => res.json({ ip: LOCAL_IP, port: PORT, version: '0.1.0' }));
-
-app.get('/api/config', (req, res) => {
-  let { screens, icons } = registry.build(app, config);
-  if (isNightMode()) {
-    const night = registry.getActiveModules().filter((m) => m.tags.includes('night'));
-    if (night.length) {
-      screens = night.map((m) => (typeof m.screen === 'function' ? m.screen(config) : m.screen));
-      icons = Object.assign({}, ...night.map((m) => m.icons || {}));
-    }
-  }
-  res.json({
-    settings: {
-      brightness: getBrightness(),
-      timezone: config.timezone,
-      scroll_speed: 50,
-      time_format: config.time_format,
-      temp_unit: config.temp_unit,
-      event_url: `${BASE}/api/event`,
-      buttons: 'navigate',
-      allow_beep: process.env.ALLOW_BEEPING !== 'false',
-      transition: 12,
-    },
-    screens,
-    icons,
-  });
-});
-
+registerConfigRoute(app, registry, config, BASE);
 registerRoutes(app, registry, alerts, getDeviceIP, PORT, haAdapter);
 registerDeviceRoutes(app, getDeviceIP);
 
@@ -149,9 +118,6 @@ app.get(/^\/(rotation|settings|notify|editor)?(\/.*)?$/, (req, res) =>
 
 loadRegistry();
 
-loadRegistry();
-
-// Write real server URL to HA config volume so the integration can read it
 try {
   const fs = await import('fs');
   fs.writeFileSync('/config/.thinclock_server', `http://${LOCAL_IP}:${PORT}`);
