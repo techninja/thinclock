@@ -4,11 +4,11 @@
 enum SensorType { SENSOR_NONE, SENSOR_BME280, SENSOR_BMP280, SENSOR_HTU21DF, SENSOR_SHT31 };
 
 struct SensorData {
-    float temperature;  // Celsius
-    float humidity;     // %RH (0 if sensor doesn't support)
-    uint16_t light;     // LDR raw 0-4095
-    uint8_t lightPct;   // LDR as 0-100%
-    bool hasTempHumidity;
+    float temperature = 0;
+    float humidity = 0;
+    uint16_t light = 0;
+    uint8_t lightPct = 0;
+    bool hasTempHumidity = false;
 };
 
 class Sensors {

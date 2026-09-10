@@ -5,6 +5,7 @@ The thinclock device runs a lightweight HTTP server on port 80. These endpoints 
 ## Endpoints
 
 ### GET /sensors
+
 Returns onboard sensor readings.
 
 ```json
@@ -12,6 +13,7 @@ Returns onboard sensor readings.
 ```
 
 ### GET /status
+
 Returns device state.
 
 ```json
@@ -19,6 +21,7 @@ Returns device state.
 ```
 
 ### POST /notify
+
 Add a notification to the queue (max 8).
 
 ```bash
@@ -36,6 +39,7 @@ curl -X POST http://device/notify \
 | `alert_interval` | int | 30000 | ms between alert repeats |
 
 ### GET /notify
+
 Returns notification count.
 
 ```json
@@ -43,9 +47,11 @@ Returns notification count.
 ```
 
 ### DELETE /notify
+
 Clear all notifications.
 
 ### POST /timer
+
 Start a countdown timer.
 
 ```bash
@@ -59,6 +65,7 @@ curl -X POST http://device/timer \
 | `color` | string | `"00AAFF"` | Timer indicator color |
 
 ### GET /timer
+
 Returns timer state.
 
 ```json
@@ -66,9 +73,11 @@ Returns timer state.
 ```
 
 ### DELETE /timer
+
 Cancel active timer.
 
 ### POST /beep
+
 Trigger a beep pattern.
 
 ```bash

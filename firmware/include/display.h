@@ -20,6 +20,7 @@ public:
     void crossfade(uint8_t progress);
     void renderToPrev();
     void renderToMain();
+    const uint8_t* getFramebuffer();
 
     // Opacity support: snapshot before layer, blend after
     void snapshotLayer();  // save current buffer state

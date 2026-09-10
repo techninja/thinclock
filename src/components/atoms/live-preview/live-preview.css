@@ -1,0 +1,11 @@
+live-preview {
+  display: inline-block;
+
+  & canvas {
+    width: 100%;
+    max-width: 640px;
+    height: auto;
+    background: #000;
+    border-radius: var(--radius-md);
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "bouncing-balls": true,
+  "clock": true,
+  "pomodoro": false,
+  "fire": {
+    "enabled": true,
+    "pinned": true
+  }
+}

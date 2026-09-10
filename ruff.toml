@@ -1,0 +1,21 @@
+target-version = "py312"
+line-length = 100
+
+[lint]
+select = [
+  "E",    # pycodestyle errors
+  "W",    # pycodestyle warnings
+  "F",    # pyflakes
+  "I",    # isort
+  "UP",   # pyupgrade
+  "B",    # flake8-bugbear
+  "SIM",  # flake8-simplify
+]
+ignore = [
+  "E501",   # line too long — enforced separately by python-size check
+  "B904",   # raise-without-from-inside-except — HA pattern uses bare raise
+  "SIM117", # nested with — fine for aiohttp async context managers
+]
+
+[lint.per-file-ignores]
+"homeassistant/custom_components/**/__init__.py" = ["E402"]  # module-level imports after globals

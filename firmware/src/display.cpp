@@ -46,6 +46,11 @@ void Display::renderToMain() {
     active_buf = render_buf;
 }
 
+const uint8_t* Display::getFramebuffer() {
+    // CRGB is {r, g, b} — 3 bytes per pixel, same layout as raw RGB
+    return reinterpret_cast<const uint8_t*>(render_buf);
+}
+
 void Display::clear() {
     neoMatrix->clear();
 }

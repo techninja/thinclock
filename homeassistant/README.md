@@ -1,46 +1,80 @@
-# ThinClock Home Assistant Integration
+# ThinClock — Home Assistant Integration
 
-Custom component for integrating ThinClock LED matrix displays with Home Assistant.
+## Quick Install
+
+### 1. Add this repo as a custom add-on repository
+
+In HA: **Settings → Add-ons → Add-on Store → ⋮ → Repositories**
+
+Add: `https://github.com/techninja/thinclock`
+
+Then install **ThinClock** from the store, configure your options, and start it.
+
+### 2. Install the custom integration
+
+Copy `custom_components/thinclock/` into your HA config directory:
+
+```
+config/
+  custom_components/
+    thinclock/   ← copy this folder here
+```
+
+Restart HA. The integration will appear under **Settings → Integrations**.
+
+### 3. Flash the firmware
+
+See the main [README](../README.md). Once the device connects to WiFi it advertises
+itself via mDNS (`thinclock.local`) and HA will show a discovery notification automatically.
+
+---
 
 ## Architecture
 
 ```
 Home Assistant
-  ├── thinclock integration (this component)
-  │     ├── Auto-discovers thinclock devices on network
-  │     ├── Exposes HA entities as data sources
-  │     └── Provides UI for screen configuration
+  ├── ThinClock add-on  (Node.js server, persistent, ingress UI in sidebar)
+  │     ├── /api/config        → served to device on boot
+  │     ├── /data/ha/:entity   → proxies any HA entity state to screens
+  │     └── WebSocket          → live framebuffer, render queue
   │
-  └── thinclock server (Node.js, runs as HA add-on or standalone)
-        ├── Serves config JSON to the device
-        ├── Screen modules (JS) define what to display
-        └── HA adapter pulls entity states for screen data
+  ├── ThinClock integration  (custom_components/thinclock/)
+  │     ├── sensor.*           → temperature, humidity, light (from device)
+  │     ├── select.*           → current screen
+  │     ├── number.*           → brightness
+  │     └── button.*           → left / middle / right physical buttons
+  │
+  └── ThinClock device  (ESP32, thinclock.local)
+        ├── Fetches config from add-on on boot
+        └── Advertises _thinclock._tcp via mDNS
 ```
 
-## Installation
+## Using HA Entities in Screens
 
-### As Custom Component
-1. Copy `custom_components/thinclock/` to your HA `config/custom_components/` directory
-2. Restart Home Assistant
-3. Go to Settings → Integrations → Add Integration → ThinClock
-4. Enter the IP address of your thinclock device
+Any HA entity is available as a data URL in screen modules:
 
-### As Add-on (planned)
-The thinclock server will be available as an HA add-on that:
-- Runs the Node.js config server
-- Auto-connects to HA's WebSocket API
-- Provides a UI panel for managing screens
-- Discovers thinclock devices via mDNS
+```js
+// src/api/screens/my-screen.js
+export const screen = {
+  layers: [{ type: 'text', label: '{{state}}°', data_url: '{{BASE}}/data/ha/sensor.thermostat_1_nativezone_temperature' }]
+};
+```
 
-## Services (planned)
+The add-on connects to HA's WebSocket API using the Supervisor token automatically —
+no manual token configuration needed when running as an add-on.
 
-- `thinclock.set_screen` — Switch to a specific screen
-- `thinclock.notify` — Show a temporary notification
-- `thinclock.set_brightness` — Adjust brightness
+## Add-on Options
 
-## Sensors (planned)
-
-The integration exposes the device's onboard sensors:
-- `sensor.thinclock_temperature`
-- `sensor.thinclock_humidity`
-- `sensor.thinclock_light`
+| Option | Description | Default |
+|---|---|---|
+| `device_ip` | ESP32 device IP (optional — used for live preview) | |
+| `timezone` | UTC offset | `-7` |
+| `brightness` | Display brightness 1–100 | `40` |
+| `brightness_night` | Night mode brightness | `10` |
+| `night_hours` | Comma-separated hours for night mode | `22,23,0,1,2,3,4,5` |
+| `time_format` | `12h` or `24h` | `12h` |
+| `temp_unit` | `F` or `C` | `F` |
+| `screen_blocklist` | Comma-separated screen IDs to disable | |
+| `allow_beeping` | Enable buzzer | `true` |
+| `wifi_ssid` / `wifi_pass` | Printed to serial for easy device setup | |
+| `owm_api_key` / `owm_city` | OpenWeatherMap (for weather screen) | |
