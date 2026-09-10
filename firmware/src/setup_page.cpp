@@ -8,7 +8,7 @@ String setupPageHTML(const String& ssid, const String& cfgURL, bool apMode,
     String ssidField;
     if (apMode) {
         String options;
-        for (auto& net : scannedNets) {
+        for (const auto& net : scannedNets) {
             String s = net.ssid; s.replace("'", "&#39;");
             options += "<option value='" + s + "'" + (s == ssid ? " selected" : "") +
                        ">" + s + " (" + net.rssi + " dBm)</option>";
