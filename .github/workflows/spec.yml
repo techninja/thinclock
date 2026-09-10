@@ -26,10 +26,10 @@ jobs:
 
       - name: Install cppcheck 2.21.0
         run: |
-          curl -fsSL https://github.com/danmar/cppcheck/archive/refs/tags/2.21.0.tar.gz | tar xz
-          cmake -S cppcheck-2.21.0 -B cppcheck-build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DHAVE_RULES=OFF
-          cmake --build cppcheck-build -j$(nproc)
-          sudo cmake --install cppcheck-build
+          curl -fsSL https://github.com/danmar/cppcheck/archive/refs/tags/2.21.0.tar.gz | tar xz -C /tmp
+          cmake -S /tmp/cppcheck-2.21.0 -B /tmp/cppcheck-build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DHAVE_RULES=OFF
+          cmake --build /tmp/cppcheck-build -j$(nproc)
+          sudo cmake --install /tmp/cppcheck-build
 
       - name: Install Playwright Chromium
         run: npx playwright install chromium --with-deps
