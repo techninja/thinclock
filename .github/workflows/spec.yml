@@ -24,8 +24,12 @@ jobs:
       - name: Install ruff
         run: pip install ruff
 
-      - name: Install cppcheck
-        run: sudo apt-get install -y cppcheck
+      - name: Install cppcheck 2.21.0
+        run: |
+          curl -fsSL https://github.com/danmar/cppcheck/archive/refs/tags/2.21.0.tar.gz | tar xz
+          cmake -S cppcheck-2.21.0 -B cppcheck-build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DHAVE_RULES=OFF
+          cmake --build cppcheck-build -j$(nproc)
+          sudo cmake --install cppcheck-build
 
       - name: Install Playwright Chromium
         run: npx playwright install chromium --with-deps
