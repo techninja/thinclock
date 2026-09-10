@@ -85,7 +85,11 @@ function deployIntegration() {
   run(`${SCP_CMD} -r ${wwwSrc}/* root@${HA_HOST}:/config/www/`);
   bar('copy ', 2, 2);
 
-  try { run(`${SSH_CMD} "ha core restart"`); } catch { /* non-fatal */ }
+  try {
+    run(`${SSH_CMD} "ha core restart"`);
+  } catch {
+    /* non-fatal */
+  }
   barDone('copy ');
   console.log('  ✓ integration done');
 }

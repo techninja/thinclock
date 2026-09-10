@@ -26,6 +26,7 @@ void setupWiFi() {
     wifiSSID        = prefs.getString("ssid", "");
     wifiPass        = prefs.getString("pass", "");
     configURL       = prefs.getString("config_url", "");
+    if (configURL.isEmpty()) configURL = "http://homeassistant.local:3232/api/config";
     bool staPending   = prefs.getBool("sta_pending", false);
     bool staConnected  = prefs.getBool("sta_connected", false);
     prefs.end();

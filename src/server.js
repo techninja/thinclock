@@ -14,9 +14,10 @@ import {
 } from './api/lib/device-proxy.js';
 import { handleUpgrade, getConnectedDeviceIP } from './api/lib/ws-render.js';
 import { advertiseMDNS } from './api/lib/mdns.js';
-import { loadRegistry } from './api/lib/device-registry.js';
+import { loadRegistry, listDevices } from './api/lib/device-registry.js';
 import { registerRoutes } from './api/routes.js';
 import { registerConfigRoute } from './api/lib/config-route.js';
+import { reconcileDevices } from './api/lib/device-reconcile.js';
 
 // Prefix all console output with a timestamp
 const _log = console.log.bind(console);
@@ -139,4 +140,5 @@ server.listen(PORT, () => {
   setInterval(() => pollDevice(getDeviceIP(), alerts), 15000);
   pollDevice(getDeviceIP(), alerts);
   setTimeout(() => cache.enqueueAll(registry.modules), 5000);
+  setTimeout(() => reconcileDevices(`${BASE}/api/config`, listDevices), 8000);
 });
