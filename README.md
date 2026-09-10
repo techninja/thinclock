@@ -2,7 +2,7 @@
 
 > Thin, config-driven ESP32 LED matrix firmware. JSON in, pixels out.
 
-![ThinClock](thinclock_logo.png)
+![ThinClock](homeassistant/custom_components/thinclock/logo.png)
 
 Built for the [Ulanzi TC001](https://www.ulanzi.com/products/ulanzi-pixel-clock-2882) and compatible 32×8 LED matrix clocks.
 
@@ -51,10 +51,28 @@ Copy `homeassistant/custom_components/thinclock/` into your HA `config/custom_co
 
 Once the device is on your network, HA will show a **"New device discovered: ThinClock"** notification. Confirm it and you get:
 
-- 🌡️ Temperature, humidity, light sensors from the device
-- 📺 Screen selector
-- 🔆 Brightness slider  
-- 🔘 Left / middle / right button entities (trigger automations!)
+- 🌡️ `sensor.*` — temperature, humidity, light (polled from device)
+- 📺 `select.*` — current screen (change from HA UI or automations)
+- 🔆 `number.*` — brightness slider
+- 🔘 `button.*` — left / middle / right physical buttons (trigger automations!)
+
+See [`homeassistant/README.md`](homeassistant/README.md) for full integration details.
+
+### Add-on options
+
+| Option | Description | Default |
+|---|---|---|
+| `device_ip` | ESP32 IP (optional — used for live preview) | |
+| `timezone` | UTC offset | `-7` |
+| `brightness` | Display brightness 1–100 | `40` |
+| `brightness_night` | Night mode brightness | `10` |
+| `night_hours` | Comma-separated hours for night mode | `22,23,0,1,2,3,4,5` |
+| `time_format` | `12h` or `24h` | `12h` |
+| `temp_unit` | `F` or `C` | `F` |
+| `screen_blocklist` | Comma-separated screen IDs to disable | |
+| `allow_beeping` | Enable buzzer | `true` |
+| `wifi_ssid` / `wifi_pass` | Printed to serial for easy device setup | |
+| `owm_api_key` / `owm_city` | OpenWeatherMap (for weather screen) | |
 
 ---
 
